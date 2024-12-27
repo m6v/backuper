@@ -1,5 +1,5 @@
 #!/bin/sh
-VERSION=2.14
+VERSION=2.15
 DISTR_DIR='/cdrom/'
 ROOT_DIR='/mnt/root/'
 BACKTITLE="Программа резервного копирования и восстановления"
@@ -9,424 +9,421 @@ cd $(dirname '$0')
 trap 'aborted' INT
 
 aborted() {
-  # clear
-  # echo Приложение прервано пользователем!"
-  # Делаем попытку размонтирования раздела
-  umount $ROOT_DIR
-  exit 1
+    # clear
+    # echo Приложение прервано пользователем!"
+    # Делаем попытку размонтирования раздела
+    umount $ROOT_DIR
+    exit 1
 }
 
 userExit() {
-  # clear
-  # echo "Приложение завершилось успешно!"
-  exit 0
+    # clear
+    # echo "Приложение завершилось успешно!"
+    exit 0
 }
 
 confirm() {
-  read -r -p "$1 [y/N] " response
-  case $response in
-    [yY])
-      true
-    ;;
-    *)
-      false
-    ;;
-  esac
+    read -r -p "$1 [y/N] " response
+    case $response in
+        [yY])
+            true
+            ;;
+        *)
+            false
+            ;;
+    esac
 }
 
 whipfile(){
-  : '
-  Функция отображает окно с текстовым полем, в котором задано значение, переданное в первом аргументе.
-  При нажатии кнопки Ok проверяется существование файла, имя которого указано в поле ввода.
-  Если файл (путь) существует, выдается сообщение об ошибке и возвращается ненулевой код возврата
-  '
-  while true; do
-    result=$(whiptail --title "Введите имя резервной копии" --inputbox "" 0 50 $1 3>&1 1>&2 2>&3)
-    if [ $? -ne 0 ];  then
-      return 1
-    fi
-    if [ -e $result ]; then
-      whiptail --title "Ошибка" --msgbox "Указанный файл существует!" 0 50 0 3>&1 1>&2 2>&3
-      return 1
-    else
-      echo $result
-      return 0
-    fi
-  done
+    : '
+    Функция отображает окно с текстовым полем, в котором задано значение, переданное в первом аргументе.
+    При нажатии кнопки Ok проверяется существование файла, имя которого указано в поле ввода.
+    Если файл (путь) существует, выдается сообщение об ошибке и возвращается ненулевой код возврата
+    '
+    while true; do
+        result=$(whiptail --title "Введите имя резервной копии" --inputbox "" 0 50 $1 3>&1 1>&2 2>&3)
+        if [ $? -ne 0 ];  then
+            return 1
+        fi
+        if [ -e $result ]; then
+            whiptail --title "Ошибка" --msgbox "Указанный файл существует!" 0 50 0 3>&1 1>&2 2>&3
+            return 1
+        else
+            echo $result
+            return 0
+        fi
+    done
 }
 
 whippart(){
-  : '
-  Функция отображает диалоговое окно со списком разделов, имеющих файловую систему ext4,
-  единственный аргумент это заголовок окна.
-  Возвращается выбранный раздел.
-  '
-  # Получить список блочных устройств с файловой системой ext4 и дополнить каждый элемент
-  # списка произвольным символом "-" для передачи в диалоговое окно whiptail вместо item
-  items=$(blkid -t TYPE=ext4 | sed 's/:.*/ -/')
-  whiptail --title "$1" --menu "" --cancel-button "Отмена" --noitem 0 50 0 $items 3>&1 1>&2 2>&3
-  return $?
+    : '
+    Функция отображает диалоговое окно со списком разделов, имеющих файловую систему ext4,
+    единственный аргумент это заголовок окна.
+    Возвращается выбранный раздел.
+    '
+    # Получить список блочных устройств с файловой системой ext4 и дополнить каждый элемент
+    # списка произвольным символом "-" для передачи в диалоговое окно whiptail вместо item
+    items=$(blkid -t TYPE=ext4 | sed 's/:.*/ -/')
+    whiptail --title "$1" --menu "" --cancel-button "Отмена" --noitem 0 50 0 $items 3>&1 1>&2 2>&3
+    return $?
 }
 
 backup() {
-  : '
-  Функция создает tar.gz архив содержимого раздела, дописывая в корень раздела файл UUID с идентификатором раздела
-  Первый аргумент функции - имя архива, второй - имя раздела
-  '
-  ARCH_NAME=$1
-  PART_NAME=$1
-  mount $PART_NAME $ROOT_DIR
-  # Записать UUID в одноименный файл в корне архивируемого раздела
-  UUID=$(blkid $PART_NAME -o value -s UUID)
-  echo $UUID > ${ROOT_DIR}UUID
-  result=$(whiptail --title "Введите имя компьютера" --inputbox "" 0 50 3>&1 1>&2 2>&3)
-  if [ $? -eq 0 ];  then
-    ARCH_NAME=${result}-$(date +%F'T'%T).tar.gz
-    ARCH_SIZE=$(echo $(du -sb $ROOT_DIR | grep -o '[0-9]*') 2.58 / p | dc)
-    tar --xattrs --acls -C $ROOT_DIR . -czf - |
+    : '
+    Функция создает tar.gz архив содержимого раздела, дописывая в корень раздела файл UUID с идентификатором раздела
+    Первый аргумент функции - имя архива, второй - имя раздела
+    '
+    ARCH_NAME=$1
+    PART_NAME=$1
+    mount $PART_NAME $ROOT_DIR
+    # Записать UUID в одноименный файл в корне архивируемого раздела
+    UUID=$(blkid $PART_NAME -o value -s UUID)
+    echo $UUID > ${ROOT_DIR}UUID
+    result=$(whiptail --title "Введите имя компьютера" --inputbox "" 0 50 3>&1 1>&2 2>&3)
+    if [ $? -eq 0 ];  then
+        ARCH_NAME=${result}-$(date +%F'T'%T).tar.gz
+        ARCH_SIZE=$(echo $(du -sb $ROOT_DIR | grep -o '[0-9]*') 2.58 / p | dc)
+        tar --xattrs --acls -C $ROOT_DIR . -czf - |
         (./pv -n -s $ARCH_SIZE > $ARCH_NAME) 2>&1 |
         whiptail --title "Создание резервной копии раздела $PART_NAME" --gauge "" 0 90 0
-  fi
-  umount $ROOT_DIR
+    fi
+    umount $ROOT_DIR
 }
 
 restore() {
-  : '
-  Функция восстанавливает содержимое раздела из tar.gz архива и присваевыет разделу идентификатор, хранящийся в файле UUID в корне архива
-  Первый аргумент функции - имя архива, второй - имя раздела
-  '
-  ARCH_NAME=$1
-  PART_NAME=$2
-  yes | mkfs.ext4 $PART_NAME
-  mount $PART_NAME $ROOT_DIR
-  (./pv -n $ARCH_NAME | tar --xattrs --xattrs-include=security.{PDPL,AUDIT,DEF_AUDIT} -xzf - -C $ROOT_DIR) 2>&1 | whiptail --title "Восстановление раздела $PART_NAME из резервной копии" --gauge "" 0 90 0
+    : '
+    Функция восстанавливает содержимое раздела из tar.gz архива и присваевыет разделу идентификатор, хранящийся в файле UUID в корне архива
+    Первый аргумент функции - имя архива, второй - имя раздела
+    '
+    ARCH_NAME=$1
+    PART_NAME=$2
+    yes | mkfs.ext4 $PART_NAME
+    mount $PART_NAME $ROOT_DIR
+    (./pv -n $ARCH_NAME | tar --xattrs --xattrs-include=security.{PDPL,AUDIT,DEF_AUDIT} -xzf - -C $ROOT_DIR) 2>&1 | whiptail --title "Восстановление раздела $PART_NAME из резервной копии" --gauge "" 0 90 0
   
-  # Считать UUID из одноименного файла в корне восстановленного раздела и присвоить его разделу, если файла UUID нет, пропускаем операцию
-  UUID=$(cat ${ROOT_DIR}UUID 2>/dev/null)
-  umount $ROOT_DIR
-  if [ -n "$UUID" ]; then
-    # Восстановление UUID раздела
-    e2fsck -f $PART_NAME
-    yes | tune2fs $PART_NAME -U $UUID  
-  fi
+    # Считать UUID из одноименного файла в корне восстановленного раздела и присвоить его разделу, если файла UUID нет, пропускаем операцию
+    UUID=$(cat ${ROOT_DIR}UUID 2>/dev/null)
+    umount $ROOT_DIR
+    if [ -n "$UUID" ]; then
+        # Восстановление UUID раздела
+        e2fsck -f $PART_NAME
+        yes | tune2fs $PART_NAME -U $UUID  
+    fi
 }
 
-# TODO Сделать меню с выводом справки, сделать функцию запуска программы testdisk
 main() {
-  while true; do
-    result=$(whiptail --backtitle "$BACKTITLE" \
-                      --title "Главное меню" \
-                      --cancel-button "Выход" \
-                      --menu "Выберите действие:" 0 0 0 \
-                      1 "Вывести информацию о накопителях" \
-                      2 "Создать копию таблицы разделов" \
-                      3 "Восстановить таблицу разделов из копии" \
-                      4 "Проверить раздел программой e2fsck" \
-                      5 "Восстановить загрузчик" \
-                      6 "Создать копию раздела" \
-                      7 "Восстановить раздел из копии" \
-                      8 "Удалить резервную копию" \
-                      9 "Установить (сменить) пароль пользователя" \
-                      10 "Сбросить счетчик неудачных попыток входа" \
-                      11 "Выполнить контроль целостности файлов" \
-                      12 "Выполнить перезагрузку" \
-                      3>&1 1>&2 2>&3)
+    while true; do
+        result=$(whiptail --backtitle "$BACKTITLE" \
+                          --title "Главное меню" \
+                          --cancel-button "Выход" \
+                          --menu "Выберите действие:" 0 0 0 \
+                          1 "Вывести информацию о накопителях" \
+                          2 "Создать копию таблицы разделов" \
+                          3 "Восстановить таблицу разделов из копии" \
+                          4 "Проверить раздел программой e2fsck" \
+                          5 "Восстановить загрузчик" \
+                          6 "Создать копию раздела" \
+                          7 "Восстановить раздел из копии" \
+                          8 "Удалить резервную копию" \
+                          9 "Установить (сменить) пароль пользователя" \
+                          10 "Сбросить счетчик неудачных попыток входа" \
+                          11 "Выполнить контроль целостности файлов" \
+                          12 "Выполнить перезагрузку" \
+                          3>&1 1>&2 2>&3)
 
-    case $? in
-      0) case $result in
-           1) menu1 ;;
-           2) menu2 ;;
-           3) menu3 ;;
-           4) menu4 ;;
-           5) menu5 ;;
-           6) menu6 ;;
-           7) menu7 ;;
-           8) menu8 ;;
-           9) menu9 ;;
-           10) menu10 ;;
-           11) menu11 ;;
-           12) menu12 ;;
-         esac
-      ;;
-      1) userExit
-      ;;
-    esac
-  done
+        case $? in
+            0)
+                case $result in
+                    1) menu1 ;;
+                    2) menu2 ;;
+                    3) menu3 ;;
+                    4) menu4 ;;
+                    5) menu5 ;;
+                    6) menu6 ;;
+                    7) menu7 ;;
+                    8) menu8 ;;
+                    9) menu9 ;;
+                    10) menu10 ;;
+                    11) menu11 ;;
+                    12) menu12 ;;
+                esac
+            ;;
+            1) userExit
+            ;;
+        esac
+    done
 }
 
 # Вывести информацию о накопителях
 menu1() {
-  # blklist=$(blkid - o list)
-  whiptail --title "Список накопителей" --msgbox "$(lsblk)" 0 50
+    # blklist=$(blkid - o list)
+    whiptail --title "Список накопителей" --msgbox "$(lsblk)" 0 50
 }
 
 # Создать копию таблицы разделов
 menu2() {
-  # Получить список дисков (не разделов), добавляя при этом к каждому элементу списка произвольное значение, например, list-devices disk | sed 's/$/ -'
-  items=$(list-devices disk | sed 's/$/ -/')
-  DEV_NAME=$(whiptail --title "Выберите диск" --menu "" --cancel-button "Отмена" --noitem 0 50 0 $items 3>&1 1>&2 2>&3)
-  if [ $? -eq 0 ];  then
-    # Дефолтное имя файла состоит из имени хоста и даты с расширением соответствующем имени диска
-    FILE_NAME=$(whipfile $(hostname)-$(date +%F).$(echo $DEV_NAME | cut -d/ -f3))
-    sfdisk -d $DEV_NAME > $FILE_NAME
-  fi
+    # Получить список дисков (не разделов), добавляя при этом к каждому элементу списка произвольное значение, например, list-devices disk | sed 's/$/ -'
+    items=$(list-devices disk | sed 's/$/ -/')
+    DEV_NAME=$(whiptail --title "Выберите диск" --menu "" --cancel-button "Отмена" --noitem 0 50 0 $items 3>&1 1>&2 2>&3)
+    if [ $? -eq 0 ];  then
+        # Дефолтное имя файла состоит из имени хоста и даты с расширением соответствующем имени диска
+        FILE_NAME=$(whipfile $(hostname)-$(date +%F).$(echo $DEV_NAME | cut -d/ -f3))
+        sfdisk -d $DEV_NAME > $FILE_NAME
+    fi
 }
 
 # Восстановить таблицу разделов из копии
 menu3() {
-  # TODO Рассмотреть необходимость использования диалога выбора файлов (см.: https://github.com/pageauc/filebrowser)
-  # Получить список с именами и размерами неисполняемых файлов в текущем каталоге
-  # NB! У файлов с пробелами отображается только часть до пробела, при их выборе дальшейшие действия вызовут ошибки
-  items=$(ls -lhF | grep -vE "(/|\*)$" | gawk -F' ' '{print $9 " " $5}')
-  FILE_NAME=$(whiptail --title "Выберите резервную копию" --menu "" --cancel-button "Отмена" 0 50 0 $items 3>&1 1>&2 2>&3)
-  if [ $? -eq 0 ];  then
-    items=$(list-devices disk | sed 's/$/ -/')
-    DEV_NAME=$(whiptail --title "Выберите диск" --menu "" --cancel-button "Отмена" --noitem 0 50 0 $items 3>&1 1>&2 2>&3)
+    # Получить список с именами и размерами неисполняемых файлов в текущем каталоге
+    # NB! У файлов с пробелами отображается только часть до пробела, при их выборе дальшейшие действия вызовут ошибки
+    items=$(ls -lhF | grep -vE "(/|\*)$" | gawk -F' ' '{print $9 " " $5}')
+    FILE_NAME=$(whiptail --title "Выберите резервную копию" --menu "" --cancel-button "Отмена" 0 50 0 $items 3>&1 1>&2 2>&3)
     if [ $? -eq 0 ];  then
-      sfdisk $DEV_NAME < $FILE_NAME
-      sleep 5
+        items=$(list-devices disk | sed 's/$/ -/')
+        DEV_NAME=$(whiptail --title "Выберите диск" --menu "" --cancel-button "Отмена" --noitem 0 50 0 $items 3>&1 1>&2 2>&3)
+        if [ $? -eq 0 ];  then
+            sfdisk $DEV_NAME < $FILE_NAME
+            sleep 5
+        fi
     fi
-  fi
 }
 
 # Проверить раздел
 menu4() {
-  PART_NAME=$(whippart "Выберите раздел для проверки")
-  if [ $? -eq 0 ];  then
-    whiptail --title "Проверка раздела $PART_NAME" --msgbox "$(e2fsck -p $PART_NAME)" 0 90
-  fi
+    PART_NAME=$(whippart "Выберите раздел для проверки")
+    if [ $? -eq 0 ];  then
+        whiptail --title "Проверка раздела $PART_NAME" --msgbox "$(e2fsck -p $PART_NAME)" 0 90
+    fi
 }
 
 # Восстановить загрузчик
 menu5() {
-  PART_NAME=$(whippart "Выберите корневой раздел ОС")
-  if [ $? -eq 0 ];  then
-    # Определить диск на котором находится раздел $PART_NAME (используется в команде grub-install)
-    DEV_NAME=$(lsblk -npdo pkname $PART_NAME)
-    mount ${PART_NAME} ${ROOT_DIR}
-    # Проверить наличие grun-install на выбранном разделе
-    if [ -f ${ROOT_DIR}/usr/sbin/grub-install ]; then
-      mount --rbind /dev ${ROOT_DIR}/dev
-      mount --rbind /proc ${ROOT_DIR}/proc
-      mount --rbind /sys ${ROOT_DIR}/sys
-      # TODO Сделать вывод команды в диалоговое окно
-      chroot ${ROOT_DIR} /usr/sbin/grub-install $DEV_NAME
-      sleep 2
-      umount -l ${ROOT_DIR}/dev
-      umount -l ${ROOT_DIR}/proc
-      umount -l ${ROOT_DIR}/sys
+    PART_NAME=$(whippart "Выберите корневой раздел ОС")
+    if [ $? -eq 0 ];  then
+        # Определить диск на котором находится раздел $PART_NAME (используется в команде grub-install)
+        DEV_NAME=$(lsblk -npdo pkname $PART_NAME)
+        mount ${PART_NAME} ${ROOT_DIR}
+        # Проверить наличие grun-install на выбранном разделе
+        if [ -f ${ROOT_DIR}/usr/sbin/grub-install ]; then
+            mount --rbind /dev ${ROOT_DIR}/dev
+            mount --rbind /proc ${ROOT_DIR}/proc
+            mount --rbind /sys ${ROOT_DIR}/sys
+            chroot ${ROOT_DIR} /usr/sbin/grub-install $DEV_NAME
+            # Задержка, чтобы дать время прочитать сообщения grub-install
+            sleep 5
+            umount -l ${ROOT_DIR}/dev
+            umount -l ${ROOT_DIR}/proc
+            umount -l ${ROOT_DIR}/sys
+        fi
+        umount -l ${ROOT_DIR}
     fi
-    umount -l ${ROOT_DIR}
-  fi
 }
 
 # Создать копию раздела
 menu6() {
-  PART_NAME=$(whippart "Выберите резервируемый раздел")
-  if [ $? -eq 0 ];  then
-    # Дефолтное имя файла состоит из имени хоста и текущей даты с расширением img
-    ARCH_NAME=$(whipfile $(hostname)-$(date +%F).img)
+    PART_NAME=$(whippart "Выберите резервируемый раздел")
     if [ $? -eq 0 ];  then
-      # TODO Проверить нужно в следующей команде перенаправление потоков или нет!
-      whiptail --title "Резервирование раздела ${PART_NAME}" --infobox "Дождитесь окончания резервирования. Информация о ходе операции в строке состояния" 7 90
-      e2image -arp $PART_NAME $ARCH_NAME
-      # Задержка, чтобы дать время прочитать сообщения об ошибках
-      if [ $? -ne 0 ]; then
-        sleep 5
-      fi
+        # Дефолтное имя файла состоит из имени хоста и текущей даты с расширением img
+        ARCH_NAME=$(whipfile $(hostname)-$(date +%F).img)
+        if [ $? -eq 0 ];  then
+            # TODO Проверить нужно в следующей команде перенаправление потоков или нет!
+            whiptail --title "Резервирование раздела ${PART_NAME}" --infobox "Дождитесь окончания резервирования. Информация о ходе операции в строке состояния" 7 90
+            e2image -arp $PART_NAME $ARCH_NAME
+            # Задержка, чтобы дать время прочитать сообщения об ошибках
+            if [ $? -ne 0 ]; then
+                sleep 5
+            fi
+        fi
     fi
-  fi
 }
 
 # Восстановить раздел из копии
 menu7() {
-  # Получить список с именами и размерами неисполняемых файлов в текущем каталоге
-  items=$(ls -lhF | grep -vE "(/|\*)$" | gawk -F' ' '{print $9 " " $5}')
-  ARCH_NAME=$(whiptail --title "Выберите резервную копию" --menu "" --cancel-button "Отмена" 0 50 0 $items 3>&1 1>&2 2>&3)   
-  if [ $? -eq 0 ];  then
-    PART_NAME=$(whippart "Выберите восстанавливаемый раздел")
+    # Получить список с именами и размерами неисполняемых файлов в текущем каталоге
+    items=$(ls -lhF | grep -vE "(/|\*)$" | gawk -F' ' '{print $9 " " $5}')
+    ARCH_NAME=$(whiptail --title "Выберите резервную копию" --menu "" --cancel-button "Отмена" 0 50 0 $items 3>&1 1>&2 2>&3)   
     if [ $? -eq 0 ];  then
-      # TODO Проверить нужно в следующей команде перенаправление потоков или нет!
-      whiptail --title "Восстановление раздела ${PART_NAME}" --infobox "Дождитесь окончания восстановления. Информация о ходе операции в строке состояния" 7 90
-      qemu-img convert -p -O raw $ARCH_NAME $PART_NAME
-      # Задержка, чтобы дать время прочитать сообщения об ошибках
-      if [ $? -ne 0 ]; then
-        sleep 5
-      fi
+        PART_NAME=$(whippart "Выберите восстанавливаемый раздел")
+        if [ $? -eq 0 ];  then
+            # TODO Проверить нужно в следующей команде перенаправление потоков или нет!
+            whiptail --title "Восстановление раздела ${PART_NAME}" --infobox "Дождитесь окончания восстановления. Информация о ходе операции в строке состояния" 7 90
+            qemu-img convert -p -O raw $ARCH_NAME $PART_NAME
+            # Задержка, чтобы дать время прочитать сообщения об ошибках
+            if [ $? -ne 0 ]; then
+                sleep 5
+            fi
+        fi
     fi
-  fi
 }
 
 # Удалить резервную копию таблицы разделов/раздела
 menu8() {
-  echo Подсказка!
-  # Получить список с именами и размерами неисполняемых файлов в текущем каталоге
-  items=$(ls -lhF | grep -vE "(/|\*)$" | gawk -F' ' '{print $9 " " $5}')
-  FILE_NAME=$(whiptail --title "Выберите резервную копию" --menu --cancel-button "Отмена" "" 0 50 0 $items 3>&1 1>&2 2>&3)   
-  if [ $? -eq 0 ];  then
-    whiptail --title "Удаление резервной копии" --yesno --yes-button "Да" --no-button "Нет" --defaultno "Удалить резервную копию ${FILE_NAME}?" 0 50
-    if [ $? -eq 0 ]; then
-      rm $FILE_NAME
+    # Получить список с именами и размерами неисполняемых файлов в текущем каталоге
+    items=$(ls -lhF | grep -vE "(/|\*)$" | gawk -F' ' '{print $9 " " $5}')
+    FILE_NAME=$(whiptail --title "Выберите резервную копию" --menu --cancel-button "Отмена" "" 0 50 0 $items 3>&1 1>&2 2>&3)   
+    if [ $? -eq 0 ];  then
+        whiptail --title "Удаление резервной копии" --yesno --yes-button "Да" --no-button "Нет" --defaultno "Удалить резервную копию ${FILE_NAME}?" 0 50
+        if [ $? -eq 0 ]; then
+            rm $FILE_NAME
+        fi
     fi
-  fi
 }
 
 # Установить (сменить) пароль пользователя
 menu9() {
-  PART_NAME=$(whippart "Выберите корневой раздел ОС")
-  if [ $? -eq 0 ];  then
-    mount $PART_NAME $ROOT_DIR
-
-    items=$(grep /bin/bash ${ROOT_DIR}/etc/passwd | sed 's/:.*/ -/')
-    result=$(whiptail --title "Выберите пользователя" --menu "" --cancel-button "Отмена" --noitem 0 50 0 $items 3>&1 1>&2 2>&3)   
+    PART_NAME=$(whippart "Выберите корневой раздел ОС")
     if [ $? -eq 0 ];  then
-      USER_NAME=$(echo $items | cut -d' ' -f$(expr $result \* 2))
-      PASSWORD=$(whiptail --title "Введите новый пароль пользователя $USER_NAME" --passwordbox " " 10 50 3>&1 1>&2 2>&3)
-      if [ $? -eq 0 ];  then
-        chroot $ROOT_DIR /bin/bash -c "echo ${USER_NAME}:${PASSWORD} | /usr/sbin/chpasswd"
-      fi
-    fi
+        mount $PART_NAME $ROOT_DIR
 
-    umount $ROOT_DIR
-  fi
+        items=$(grep /bin/bash ${ROOT_DIR}/etc/passwd | sed 's/:.*/ -/')
+        result=$(whiptail --title "Выберите пользователя" --menu "" --cancel-button "Отмена" --noitem 0 50 0 $items 3>&1 1>&2 2>&3)   
+        if [ $? -eq 0 ];  then
+            USER_NAME=$(echo $items | cut -d' ' -f$(expr $result \* 2))
+            PASSWORD=$(whiptail --title "Введите новый пароль пользователя $USER_NAME" --passwordbox " " 10 50 3>&1 1>&2 2>&3)
+            if [ $? -eq 0 ];  then
+                chroot $ROOT_DIR /bin/bash -c "echo ${USER_NAME}:${PASSWORD} | /usr/sbin/chpasswd"
+            fi
+        fi
+
+        umount $ROOT_DIR
+    fi
 }
 
 # Сбросить счетчик неудачных попыток входа
 menu10() {
-  PART_NAME=$(whippart "Выберите корневой раздел ОС")
-  if [ $? -eq 0 ];  then
-    mount $PART_NAME $ROOT_DIR
-    chroot $ROOT_DIR /usr/bin/faillog -r
-    umount $ROOT_DIR
-  fi
+    PART_NAME=$(whippart "Выберите корневой раздел ОС")
+    if [ $? -eq 0 ];  then
+        mount $PART_NAME $ROOT_DIR
+        chroot $ROOT_DIR /usr/bin/faillog -r
+        umount $ROOT_DIR
+    fi
 }
 
 # Выполнить контроль целостности файлов
 menu11() {
-  whiptail --title "Выполнение контроля целостности файлов" --infobox "Дождитесь окончания проверки. Информация о ходе операции в строке состояния" 7 90
-  mount /dev/sda1 $ROOT_DIR
+    whiptail --title "Выполнение контроля целостности файлов" --infobox "Дождитесь окончания проверки. Информация о ходе операции в строке состояния" 7 90
+    mount /dev/sda1 $ROOT_DIR
 
-  checked=0
-  errors=0
-  rm -f /tmp/errors
-  # сохранить позицию курсора
-  tput sc
-  # сделать курсор невидимым
-  tput civis
-  while read -r line;
-  do
-    # eval объединяет аргумента в одну строку и выполняет ее, после выполнения возвращает ее exit ststus
-    # имена файлов дополнительно обрамляем кавычками, т.к. встечаются круглые скобки, которые eval ошибочно интерпретирует
-    eval $(echo "$line" | grep -v -E "^#" | gawk '{print("gostsum="$1" filename=\""$2"\"")}')
-    if [ -f $filename ]; then
-      if [ "$gostsum" != "$(gostsum ${ROOT_DIR}${filename} 2>/dev/null | cut -d" " -f1)" ]; then
-        # Не ясно почему иногда встречаются пустые строки
-        if [ -n "$filename" ]; then
-          echo $filename >> /tmp/errors
-          let errors=$errors+1
+    checked=0
+    errors=0
+    rm -f /tmp/errors
+    # сохранить позицию курсора
+    tput sc
+    # сделать курсор невидимым
+    tput civis
+    while read -r line; do
+        # eval объединяет аргумента в одну строку и выполняет ее, после выполнения возвращает ее exit ststus
+        # имена файлов дополнительно обрамляем кавычками, т.к. встечаются круглые скобки, которые eval ошибочно интерпретирует
+        eval $(echo "$line" | grep -v -E "^#" | gawk '{print("gostsum="$1" filename=\""$2"\"")}')
+        if [ -f $filename ]; then
+            if [ "$gostsum" != "$(gostsum ${ROOT_DIR}${filename} 2>/dev/null | cut -d" " -f1)" ]; then
+            # Не ясно почему иногда встречаются пустые строки
+                if [ -n "$filename" ]; then
+                    echo $filename >> /tmp/errors
+                    let errors=$errors+1
+                fi
+            fi
+            let checked=$checked+1
         fi
-      fi
-      let checked=$checked+1
-    fi
-    tput cup 36 0
-    echo -n "Проверено "${checked}" объектов, ошибок "${errors}
-  done < ${DISTR_DIR}gostsums.txt
+        tput cup 36 0
+        echo -n "Проверено "${checked}" объектов, ошибок "${errors}
+    done < ${DISTR_DIR}gostsums.txt
 
-  # сделать курсор "нормальным"
-  tput cnorm
-  # восстановить позицию курсора
-  tput rc
+    # сделать курсор "нормальным"
+    tput cnorm
+    # восстановить позицию курсора
+    tput rc
 
-  whiptail --title "Список файлов с нарушенной целостностью" --scrolltext --textbox /tmp/errors 20 90
+    whiptail --title "Список файлов с нарушенной целостностью" --scrolltext --textbox /tmp/errors 20 90
 
-  umount $ROOT_DIR
+    umount $ROOT_DIR
 
 }
 
 # Выполнить перезагрузку
 menu12() {
-  eject
-  reboot
+    eject
+    reboot
 }
 
 # Проверить, что первый аргумент является существующим файлом, а второй аргумент разделом ext4
 checkargs() {
-  if [ $# -lt 2 ]; then
-    echo "Файл и/или раздел не задан(ы)"
-    exit 1
-  fi
-  ARCH_NAME=$1
-  if [ ! -f $ARCH_NAME ]; then
-    echo "Файл $ARCH_NAME не существует"
-    exit 1
-  fi
-  shift
-  PART_NAME=$1
-  echo $(blkid -t TYPE=ext4) | sed 's/:.*//' | grep -q -E "$PART_NAME$"
-  if [ $? -ne 0 ]; then
-    echo "Раздел $PART_NAME не существует или не является ext4"
-    exit 1
-  fi
+    if [ $# -lt 2 ]; then
+        echo "Файл и/или раздел не задан(ы)"
+        exit 1
+    fi
+    ARCH_NAME=$1
+    if [ ! -f $ARCH_NAME ]; then
+        echo "Файл $ARCH_NAME не существует"
+        exit 1
+    fi
+    shift
+    PART_NAME=$1
+    echo $(blkid -t TYPE=ext4) | sed 's/:.*//' | grep -q -E "$PART_NAME$"
+    if [ $? -ne 0 ]; then
+        echo "Раздел $PART_NAME не существует или не является ext4"
+        exit 1
+    fi
 }
 
 verbose=false
 show_help=false
 if [ $# -gt 0 ]; then
-  case $1 in
-    -c|--create)
-      shift
-      checkargs $1 $2
-      operation="e2image -arp $PART_NAME $ARCH_NAME"
-      ;;
-    -x|--extract)
-      shift
-      checkargs $1 $2
-      operation="qemu-img convert -p -O raw $ARCH_NAME $PART_NAME"
-      ;;  
-    -d|delete)
-      shift
-      if [ $# -lt 1 ]; then
-        echo "Файл не задан"
-        exit 1
-      fi
-      ARCH_NAME=$1
-      if [ ! -f "$ARCH_NAME" ]; then
-        echo "Файл $ARCH_NAME не существует"
-        exit 1
-      fi
-      operation="rm $ARCH_NAME"
-      ;;
-    -v|--verbose)
-      verbose=true
-      ;;
-    -h|--help)
-      show_help=true
-      ;;
-    --version)
-      echo backuper $VERSION
-      exit
-      ;;
-    *)
-      echo "Неизвестный параметр $1"
-      exit
-      ;;
-  esac
+    case $1 in
+        -c|--create)
+            shift
+            checkargs $1 $2
+            operation="e2image -arp $PART_NAME $ARCH_NAME"
+            ;;
+        -x|--extract)
+            shift
+            checkargs $1 $2
+            operation="qemu-img convert -p -O raw $ARCH_NAME $PART_NAME"
+            ;;  
+        -d|delete)
+            shift
+            if [ $# -lt 1 ]; then
+                echo "Файл не задан"
+                exit 1
+            fi
+            ARCH_NAME=$1
+            if [ ! -f "$ARCH_NAME" ]; then
+                echo "Файл $ARCH_NAME не существует"
+                exit 1
+            fi
+            operation="rm $ARCH_NAME"
+            ;;
+        -v|--verbose)
+            verbose=true
+            ;;
+        -h|--help)
+            show_help=true
+            ;;
+        --version)
+            echo backuper $VERSION
+            exit
+            ;;
+        *)
+            echo "Неизвестный параметр $1"
+            exit
+            ;;
+    esac
 fi
 
 if $show_help; then
-  echo "Использование: backuper [-c|-x ФАЙЛ РАЗДЕЛ]|[-d ФАЙЛ]|-h|-v|--version"
-  echo "Резервирование и восстановление программного обеспечения, выполнение служебных операций"
-  echo
-  echo "Аргументы, обязательные для длинных параметров, обязательны и для коротких"
-  echo "  -c, --create  создать резервную копию раздела диска"
-  echo "  -x, --extract восстановить раздел диска из резервной копии"
-  echo "  -d, --delete  удалить резервную копию раздела диска"
-  echo "  -v, --verbose показывать служебные сообщения"
-  echo
-  echo "  -h, --help    показать эту справку и выйти"
-  echo "      --version показать информацию о версии и выйти"
-  echo "Если операция не задана, программа запускается в интерактивном режиме"
-  exit
+    echo "Использование: backuper [-c|-x ФАЙЛ РАЗДЕЛ]|[-d ФАЙЛ]|-h|-v|--version"
+    echo "Резервирование и восстановление программного обеспечения, выполнение служебных операций"
+    echo
+    echo "Аргументы, обязательные для длинных параметров, обязательны и для коротких"
+    echo "  -c, --create  создать резервную копию раздела диска"
+    echo "  -x, --extract восстановить раздел диска из резервной копии"
+    echo "  -d, --delete  удалить резервную копию раздела диска"
+    echo "  -v, --verbose показывать служебные сообщения"
+    echo
+    echo "  -h, --help    показать эту справку и выйти"
+    echo "      --version показать информацию о версии и выйти"
+    echo "Если операция не задана, программа запускается в интерактивном режиме"
+    exit
 fi
 
 # Извлечение файлов, необходимых для работы, но отсутствующих в среде восстановления Astra Linux
@@ -443,7 +440,7 @@ fi
 #     иначе устанавливается только первый из найденных, что не всегда неверно!
 
 if $verbose; then
-  echo "Установка пакетов..."
+    echo "Установка пакетов..."
 fi
 
 # Списки пакетов для Astra Linux SE версий 1.6 и 1.7 соответственно
@@ -473,31 +470,27 @@ items17="libacl libselinux libattr libpcre3 gzip tar \
         "
 # TODO Сделать автоматическое определение версии ОС и выбор соответствующего списка пакетов
 items=$items16
-for item in $items;
-  do
+for item in $items; do
     pkg=$(find $DISTR_DIR -iname $item*amd64.deb)
     if [  -z $pkg ]; then
-      if ! confirm "Пакет $item не найден. Продолжить?"; then
-        exit
-      fi
+        if ! confirm "Пакет $item не найден. Продолжить?"; then
+            exit
+        fi
     else
-      if $verbose; then
-        echo $pkg
-      fi
-      ar -x $pkg data.tar.xz
-      xzcat data.tar.xz | tar -C / -xf -
-      rm -f data.tar.xz
+        if $verbose; then
+            echo $pkg
+        fi
+        ar -x $pkg data.tar.xz
+        xzcat data.tar.xz | tar -C / -xf -
+        rm -f data.tar.xz
     fi
-  done
+done
 
 mkdir -p $ROOT_DIR
 
-# chcksums
-# exit
-
 # Если в командной строке не задана выполняемая операция, запускаем программу в интерактивном режиме
 if [ -z "$operation" ]; then
-  main
+    main
 else
-  echo $operation
+    echo $operation
 fi
