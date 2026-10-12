@@ -29,7 +29,7 @@ select_partitions_dialog() {
     # Установка нового разделителя строк
     local IFS='|'
     # Счетчик разделов
-    part_len=0
+    part_count=0
     for line in $lines_pipeline; do
         [ -z "$line" ] && continue
         # Извлечение имени раздела (1-е поле) и описания (с 5-го поля)
@@ -37,7 +37,7 @@ select_partitions_dialog() {
         local description=$(echo "$line" | cut -d" " -f5-)
         # Добавление элемента в массив для whiptail
         set -- "$@" "$partition" "$description" "OFF"
-        part_len=$((part_len + 1))
+        part_count=$((part_count + 1))
     done
 
     # Возврат стандартного разделителя строк
@@ -48,13 +48,13 @@ select_partitions_dialog() {
 
     # Подсчет количества разделов (число аргументов деленное на 3)
     # Теперь считаем в цикле
-    # local part_len=$(( $# / 3 ))
+    # local part_count=$(( $# / 3 ))
 
     # Установка высоты внутренней рамки равной количеству разделов
-    local list_height=$part_len
+    local list_height=$part_count
     
     # Установка высоты окна (количество строк + 7 строк на шапку и кнопки)
-    local window_height=$(( part_len + 7 ))
+    local window_height=$(( part_count + 7 ))
 
     # Ограничение высоты списка и окна значениями 10 и 17 соответственно
     if [ "$list_height" -gt 10 ]; then
