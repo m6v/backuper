@@ -10,4 +10,39 @@ mount /dev/disk/by-label/BACKUP /mnt
 /mnt/backuper.sh
 ```
 
+```
+# Функция ищет на дисках EFI System partition и добавляет в NVRAM запись,
+# в backuper.sh запись добавляется при восстановлении EFI System partition
+add_nvram_entry() {
+  info=""
+  # Iterate by all block devices
+  for dev in /sys/class/block/*/device; do
+    DISK=/dev/$(basename $(dirname $dev))
+    info=$(sfdisk -d $DISK | grep C12A7328)
+    if [ -n "$info" ]; then break; fi
+  done
+  if [ -z "$info" ]; then
+    echo "Error. ESP is not found"
+    return 1
+  fi
+  ESP_DISK="$DISK"
+  # Get all sybmols before first space
+  ESP_PART="${info%% *}"
+  # Get all last digits
+  ESP_NUM="${ESP_PART##*[a-zA-Z]}"
+  # Get uuid
+  t="${info#*uuid=}"
+  ESP_UUID="${t%%,*}"
+
+  echo "Adding entry to NVRAM..."
+  if ! efibootmgr -v | grep -iq $ESP_UUID; then
+    echo "efibootmgr -c -d $ESP_DISK -p $ESP_NUM -L 'astralinux' -l '\EFI\astralinux\grubx64.efi'"
+    echo "Boot entry successfully added to NVRAM"
+  else
+    echo "Boot entry already exists in NVRAM, skipped"
+  fi
+}
+```
+
+
 Программа `pv` это просмотрщик пайпов (pipeviewer), который показывает прогресс выполнение той или иной команды по конвейеру и предоставляя информацию (прошедшее время, процент завершения (с индикатором выполнения), текущую пропускную способность, общий объем данных и ETA) 

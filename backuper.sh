@@ -1,5 +1,6 @@
 #!/bin/sh
 
+# Настройка переменных
 BASE_DIR="$(cd $(dirname $0) && pwd)"
 export PATH="$BASE_DIR:$PATH"
 export LD_LIBRARY_PATH="$BASE_DIR${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
@@ -26,34 +27,31 @@ select_partitions_dialog() {
 
     # Очистка системных параметров для наполнения меню
     set -- 
+
     # Установка нового разделителя строк
     local IFS='|'
     # Счетчик разделов
-    part_count=0
+    local part_count=0
     for line in $lines_pipeline; do
         [ -z "$line" ] && continue
         # Извлечение имени раздела (1-е поле) и описания (с 5-го поля)
         local partition=$(echo "$line" | cut -d" " -f1)
         local description=$(echo "$line" | cut -d" " -f5-)
         # Добавление элемента в массив для whiptail
-        set -- "$@" "$partition" "$description" "OFF"
-        part_count=$((part_count + 1))
+        set -- "$@" "$partition" "$description" "ON"
+        part_count=$(( part_count + 1 ))
     done
 
     # Возврат стандартного разделителя строк
     unset IFS
 
-    # Тихий выход, если массив пуст
+    # Выход, если массив пуст (на диск не размечен)
     [ $# -eq 0 ] && return 1
-
-    # Подсчет количества разделов (число аргументов деленное на 3)
-    # Теперь считаем в цикле
-    # local part_count=$(( $# / 3 ))
 
     # Установка высоты внутренней рамки равной количеству разделов
     local list_height=$part_count
     
-    # Установка высоты окна (количество строк + 7 строк на шапку и кнопки)
+    # Установка высоты окна (количество строк + 7 строк на заголовок и кнопки)
     local window_height=$(( part_count + 7 ))
 
     # Ограничение высоты списка и окна значениями 10 и 17 соответственно
@@ -73,11 +71,11 @@ select_partitions_dialog() {
     local selections
     selections=$(whiptail --title "Выбор разделов" \
         --checklist "Выберите разделы для работы (Пробел - выбор, Enter - ОК):" \
-        $window_height 70 $list_height \
+        $window_height 60 $list_height \
         --separate-output \
         "$@" 3>&1 1>&2 2>&3 </dev/tty)
 
-    # Молчаливый возврат результата
+    # Возврат списка выбранных разделов, если нажата <OK>
     if [ $? -eq 0 ] && [ -n "$selections" ]; then
         echo "$selections"
         return 0
@@ -88,25 +86,25 @@ select_partitions_dialog() {
 
 backup_gpt() {
   DISK=$1
-  echo "Backup GPT of $DISK..."
+  echo "Backuping GPT of $DISK..."
   mkdir -p $BASE_DIR/$HOSTNAME
   IMAGE=$BASE_DIR/$HOSTNAME/$(basename $DISK).sf
 
   if ! sfdisk -d $DISK > $IMAGE; then
-    echo "Error. Failed to backup GPT"
+    echo "Failed to backup GPT"
     return 1
   fi
   echo "GPT has been successfully backed to $IMAGE"
 
   IMAGE=$BASE_DIR/$HOSTNAME/$(basename $DISK).fd
   fdisk -l "$DISK" > $IMAGE
-  echo "Save partitions info to $IMAGE"
+  echo "Partitions info saved to $IMAGE"
 }
 
 restore_gpt() {
   DISK=$(select_disk_dialog)
   if [ $? -ne 0 ]; then
-    echo "Warning. Restoring GUID partition table canceled"
+    echo "Restoring GUID partition table canceled"
     return 1;
   fi
 
@@ -114,25 +112,25 @@ restore_gpt() {
   echo "Restoring GUID partition table of $DISK..."
 
   if mount | grep ^$DISK; then
-    echo "Error. Device $DISK is busy"
+    echo "Device $DISK is busy"
     return 1
   fi
   if [ ! -f $IMAGE ]; then
-    echo "Error. Dump of partition table $IMAGE is not found"
+    echo "Dump of partition table $IMAGE is not found"
     return 2
   fi
   if sfdisk $DISK < $IMAGE; then
     echo "GPT has been successfully restored from $IMAGE"
    return 0
   fi
-  echo "Error. Failed to restore GPT"
+  echo "Failed to restore GPT"
 }
 
 backup_part() {
   DISK=$1
   PARTITION=$2
   if mount | grep $PARTITION; then
-    echo "Error. Partition $PARTITION is mounted, backup skipped"
+    echo "Partition $PARTITION is mounted, backup skipped"
     return 1
   fi
 
@@ -142,19 +140,16 @@ backup_part() {
   part_info=$(blkid | grep $PARTITION)
   part_type=$(echo "$part_info" | sed 's/.*TYPE="\([^"]*\).*/\1/')
 
-  echo "Backup $PARTITION..."
+  echo "Backuping $PARTITION..."
   case "$part_type" in
     ext4|ext3|ext2)
       e2image -arpf $PARTITION - | gzip > $IMAGE
       ;;
-    vfat)
-      dd if=$PARTITION bs=4M status=progress | gzip > $IMAGE
-      ;;
     swap)
-      echo "Warning. Skipped swap partition"
+      echo "Skipped swap partition"
       ;;
     *)
-      echo "Error. Unsupported filesystem $part_type"
+      dd if=$PARTITION bs=4M status=progress | gzip > $IMAGE
       ;;
   esac
 }
@@ -169,7 +164,7 @@ restore_part() {
 
   IMAGE=$BASE_DIR/$HOSTNAME/$(basename $PARTITION).gz
   if [ ! -f $IMAGE ]; then
-    echo "Error. Image $IMAGE is not found"
+    echo "Image $IMAGE is not found"
     return 2
   fi
 
@@ -183,62 +178,31 @@ restore_part() {
   fi
 
   echo "Restoring partition $PARTITION..."
-  # TODO Определить тип носителя и для SSD/NVMe выполнить "blkdiscard $PARTITION" перед бэкапом и добавить параметр parm="conv=sparse",
-  # при бэкапе HDD добавить параметр parm="conv=fdatasync" option
-  gzip -dc $IMAGE | dd of=$PARTITION bs=4M status=progress "$parm"
+  # TODO Определить тип носителя и для SSD/NVMe перед бэкапом выполнить "blkdiscard $PARTITION" и добавить в dd параметр parm="conv=sparse",
+  # при бэкапе HDD добавить в dd параметр parm="conv=fdatasync"
+  gzip -dc $IMAGE | dd of=$PARTITION bs=4M status=progress $parm
   
-  return 0
   # Добавление записи в NVRAM, если восстанавливаемый раздел это ESP
   PARTITION_INFO=$(sfdisk -d $DISK | grep $PARTITION.*C12A7328)
-  if [ -z $PARTITION_INFO ]; then
+  if [ -z "$PARTITION_INFO" ]; then
     return 0
   fi
-  # TODO Проверить правильность кода!!
+
   PARTITION_NUMBER="${PARTITION##*[a-zA-Z]}"
   PARTITION_UUID="${PARTITION_INFO#*uuid=}"
-  echo "Add entry to NVRAM..."
+  echo "Adding boot entry to NVRAM..."
   if ! efibootmgr -v | grep -iq $PARTITION_UUID; then
-    echo "efibootmgr -c -d $DISK -p $PARTITION_NUMBER -L 'astralinux' -l '\EFI\astralinux\grubx64.efi'"
-    echo "Boot entry successfully added to NVRAM"
+    efibootmgr -c -d $DISK -p $PARTITION_NUMBER -L 'astralinux' -l '\EFI\astralinux\grubx64.efi'
+    echo "Boot entry added to NVRAM succefully"
   else
-    echo "Warning. Boot entry already exists in NVRAM, skipped"
-  fi
-}
-
-add_nvram_entry() {
-  info=""
-  # Iterate by all block devices
-  for dev in /sys/class/block/*/device; do
-    DISK=/dev/$(basename $(dirname $dev))
-    info=$(sfdisk -d $DISK | grep C12A7328)
-    if [ -n "$info" ]; then break; fi
-  done
-  if [ -z "$info" ]; then
-    echo "Error. ESP is not found"
-    return 1
-  fi
-  ESP_DISK="$DISK"
-  # Get all sybmols before first space
-  ESP_PART="${info%% *}"
-  # Get all last digits
-  ESP_NUM="${ESP_PART##*[a-zA-Z]}"
-  # Get uuid
-  t="${info#*uuid=}"
-  ESP_UUID="${t%%,*}"
-
-  echo "Add entry to NVRAM..."
-  if ! efibootmgr -v | grep -iq $ESP_UUID; then
-    echo "efibootmgr -c -d $ESP_DISK -p $ESP_NUM -L 'astralinux' -l '\EFI\astralinux\grubx64.efi'"
-    echo "Boot entry successfully added to NVRAM"
-  else
-    echo "Warning. Boot entry already exists in NVRAM, skipped"
+    echo "Boot entry already exists in NVRAM, skipped"
   fi
 }
 
 backup() {
   DISK=$(select_disk_dialog)
   if [ $? -ne 0 ]; then
-    echo "Warning. Backuping partition(s) canceled"
+    echo "Backuping partition(s) canceled"
     return 1
   fi
 
@@ -246,7 +210,7 @@ backup() {
   # Проверка, что выбран хотя бы один раздел
   if [ -n "$PARTITIONS" ]; then
 
-    whiptail --title "Создание образа(ов) раздела(ов)" --infobox "Ждите завершения операции. Прогресс в строке состояния" 7 50
+    whiptail --title "Создание образов разделов" --infobox "Ждите завершения операции. Прогресс в строке состояния" 7 60
     backup_gpt  "$DISK"
     # Передача списка строк в цикл построчно
     echo "$PARTITIONS" | while IFS= read -r PART; do
@@ -256,21 +220,21 @@ backup() {
     done
 
   else
-    echo "Warning. No partitions selected"
+    echo "No partitions selected"
   fi
 }
 
 restore() {
   DISK=$(select_disk_dialog)
   if [ $? -ne 0 ]; then
-    echo "Warning. Restoring partition(s) canceled"
+    echo "Restoring partition(s) canceled"
     return 1
   fi
 
   PARTITIONS=$(select_partitions_dialog "$DISK")
   # Проверка, что выбран хотя бы один раздел
   if [ -n "$PARTITIONS" ]; then
-    whiptail --title "Восстановление раздела(ов) из образа(ов)" --infobox "Ждите завершения операции. Прогресс в строке состояния" 7 50
+    whiptail --title "Восстановление разделов из образов" --infobox "Ждите завершения операции. Прогресс в строке состояния" 7 60
     # Передача списка строк в цикл построчно
     echo "$PARTITIONS" | while IFS= read -r PART; do
       # Пропуск пустых строк
@@ -278,28 +242,27 @@ restore() {
       restore_part $DISK $PART
     done
   else
-    echo "Warning. No partitions selected"
+    echo "No partitions selected"
   fi
 }
 
 while true; do
-  HOSTNAME=$(whiptail --title "Ввод имени хоста" --inputbox "Введите имя хоста:" 10 50 "$(hostname)" 3>&1 1>&2 2>&3)
+  HOSTNAME=$(whiptail --title "Ввод имени хоста" --inputbox "Введите имя хоста:" 10 60 "$(hostname)" 3>&1 1>&2 2>&3)
   if [ $? -ne 0 ]; then exit 1; fi
 
   if echo $HOSTNAME | grep -qxE '^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?$'; then
     break
   fi
-  whiptail --title "Error" --msgbox "Неправильное имя хоста '$HOSTNAME'. Please try again" 0 50
+  whiptail --title "Error" --msgbox "Недопустимое имя хоста '$HOSTNAME'. Повторите ввод" 0 60
+
 done
 
-  # TODO Если при восстановлении ESP запись в NVRAM будет добавляться автоматически, убрать add_nvram_entry и сооттветствующий пункт меню!
-  while true; do
-    menu=$(whiptail --title "Главное меню" --menu "Выбор действия для $HOSTNAME:" 0 50 0 \
+while true; do
+  menu=$(whiptail --title "Главное меню" --menu "Выбор действия для $HOSTNAME:" 0 60 0 \
     "1" "Создать образы разделов" \
     "2" "Восстановить разделы из образов" \
     "3" "Восстановить таблицу разделов (GPT)" \
-    "4" "Добавить запись в NVRAM" \
-    "5" "Выход" 3>&1 1>&2 2>&3)
+    "4" "Выход" 3>&1 1>&2 2>&3)
 
   if [ $? -ne 0 ]; then
     printf '\033[H\033[J'; exit 0
@@ -309,15 +272,10 @@ done
     "1") backup ;;
     "2") restore ;;
     "3") restore_gpt ;;
-    "4") add_nvram_entry ;;
-    "5") printf '\033[H\033[J'; exit 0 ;;
+    "4") printf '\033[H\033[J'; exit 0 ;;
   esac
 
   printf "Press any key to continue..."
   read -s -n 1 dummy
-  # Это вариант для других оболочек
-  # stty -icanon -echo min 1
-  # read dummy
-  # stty sane
 
 done
