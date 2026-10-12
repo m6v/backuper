@@ -25,7 +25,7 @@ select_partitions_dialog() {
     # Склеивание строк с разделителем '|' для обработки в цикле
     local lines_pipeline=$(echo "$partitions_info" | tr '\n' '|')
 
-    # Очистка системных параметров для наполнения меню
+    # Очистка позиционных параметров, переданных скрипту при запуске
     set -- 
 
     # Установка нового разделителя строк
@@ -34,10 +34,10 @@ select_partitions_dialog() {
     local part_count=0
     for line in $lines_pipeline; do
         [ -z "$line" ] && continue
-        # Извлечение имени раздела (1-е поле) и описания (с 5-го поля)
+        # Извлечение имени раздела (1-е поле) и описания (с 5-го поля до конца)
         local partition=$(echo "$line" | cut -d" " -f1)
         local description=$(echo "$line" | cut -d" " -f5-)
-        # Добавление элемента в массив для whiptail
+        # Добавление нового триплета к списку параметров для последующей передачи whiptail
         set -- "$@" "$partition" "$description" "ON"
         part_count=$(( part_count + 1 ))
     done
