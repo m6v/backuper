@@ -178,8 +178,15 @@ restore_part() {
   fi
 
   echo "Restoring partition $PARTITION..."
-  # TODO Определить тип носителя и для SSD/NVMe перед бэкапом выполнить "blkdiscard $PARTITION" и добавить в dd параметр parm="conv=sparse",
-  # при бэкапе HDD добавить в dd параметр parm="conv=fdatasync"
+  # Определение типа диска и установка доп. параметра
+  if [ $(cat /sys/block/$(basename $DISK)/queue/rotational) -eq 0 ]; then
+    # Это SSD диск
+    blkdiscard $PARTITION
+    parm="conv=sparse"
+  else
+    # Это HDD диск
+    parm="conv=fdatasync"
+  fi
   gzip -dc $IMAGE | dd of=$PARTITION bs=4M status=progress $parm
   
   # Добавление записи в NVRAM, если восстанавливаемый раздел это ESP
