@@ -1,0 +1,68 @@
+в Astra Linux SE 1.6 работает версия partclone 0.2.89-1, доступная на https://sourceforge.net/projects/partclone/files/debian/debian-stretch-amd64/
+в Astra Linux SE 1.7 работает версия 0.3.11-1, 0.3.13(testing), более поздние стабильные версии требуют libcrypto.so.3 (в составе дистрибутива libcrypto.so.1).
+
+Разобраться сертифицирован ли partclone из состава Alt Linux
+https://packages.altlinux.org/en/sisyphus/srpms/partclone/rpms/
+
+---- Компиляция ----
+
+Компиляция из исходников версии 0.3.32 доступных в репозитории Alt Linux (проверена в xubuntu 24.04)
+
+wget https://git.altlinux.org/tasks/364407/build/100/x86_64/srpm/partclone-0.3.32-alt1.src.rpm
+apt install e2fslibs-dev
+# вместо «e2fslibs-dev» выбирается «libext2fs-dev»
+apt install rpm2cpio
+rpm2cpio ./partclone-0.3.32-alt1.src.rpm | cpio -idmv
+tar -xvf ./partclone-0.3.32.tar
+./autogen
+./configure --enable-extfs
+make
+# в каталоге ./src получаем файл partclone.extfs
+ 
+Разобраться сертифицирован ли partclone из состава Alt Linux
+https://packages.altlinux.org/en/sisyphus/srpms/partclone/rpms/
+
+---- Применение патчей ----
+
+patch < partclone-0.3.6-no_fail_mbr.patch
+ 
+cp partclone-0.3.32-build.patch ./src
+cp partclone-0.3.20-checkfs.patch ./tests
+ 
+cd ./src
+patch < partclone-0.3.32-build.patch
+ 
+cd ../tests
+patch < partclone-0.3.20-checkfs.patch
+
+---- Операции резервирования и сосстановления ----
+
+Создание локального образа
+partclone.ext4 -c -d -s $DEV_NAME -o $FILE_NAME
+Создание образа на удаленном хосте
+partclone.ext4 -c -d -s $DEV_NAME 2>/dev/null | xz -T0 | ssh user@server "cat > ~/$FILE_NAME"
+Создание сжатого образа
+partclone.ext4 -c -s $DEV_NAME | gzip -c -9 > $ARCH_NAME
+или
+partclone.ext4 -c -d -s $DEV_NAME -o $ARCH_NAME -x "xz -T0"
+
+Восстановление из образа
+partclone.ext4 -r -s $FILE_NAME -o $DEV_NAME
+Восстановление из сжатого образа
+gzip -c -d $ARCH_NAME | partclone.ext4 -r -o $DEV_NAME
+или
+zcat $ARCH_NAME | partclone.ext4 -r -o $DEV_NAME
+
+Восстановление образа, сделанного с помощью clonezilla(split, gzip,)
+cat sda1.ext3-ptcl-img.gz.a* | gunzip -c | partclone.ext4 -d -r -s - -o /dev/sda1
+
+Отображение тексового интерфейса (ncurses) осуществляется путем указания опции -N, --ncurse
+
+TODO
+Команда
+e2fsck -f $DEV_NAME
+resize2fs -M $DEV_NAME
+служит для сжатия файловой системы до минимума, чтобы она могла успешно поместиться на раздел меньшего размера.
+После выполнения команды размер раздела остался неизменным, в чем заключается суть команды непонятно!
+
+
