@@ -136,6 +136,7 @@ backup_part() {
 
   mkdir -p $BASE_DIR/$HOSTNAME
   IMAGE=$BASE_DIR/$HOSTNAME/$(basename $PARTITION).gz
+  # IMAGE=$BASE_DIR/$HOSTNAME/$(basename $PARTITION).zst
 
   part_info=$(blkid | grep $PARTITION)
   part_type=$(echo "$part_info" | sed 's/.*TYPE="\([^"]*\).*/\1/')
@@ -144,12 +145,14 @@ backup_part() {
   case "$part_type" in
     ext4|ext3|ext2)
       e2image -arpf $PARTITION - | gzip > $IMAGE
+      # e2image -arpf $PARTITION - | zstd -T0 > $IMAGE
       ;;
     swap)
       echo "Skipped swap partition"
       ;;
     *)
       dd if=$PARTITION bs=4M status=progress | gzip > $IMAGE
+      # dd if=$PARTITION bs=4M status=progress | zstd -T0 > $IMAGE
       ;;
   esac
 }
@@ -163,6 +166,7 @@ restore_part() {
   fi
 
   IMAGE=$BASE_DIR/$HOSTNAME/$(basename $PARTITION).gz
+  # IMAGE=$BASE_DIR/$HOSTNAME/$(basename $PARTITION).zst
   if [ ! -f $IMAGE ]; then
     echo "Image $IMAGE is not found"
     return 2
@@ -188,6 +192,7 @@ restore_part() {
     parm="conv=fdatasync"
   fi
   gzip -dc $IMAGE | dd of=$PARTITION bs=4M status=progress $parm
+  # zstd -dc -T0 $IMAGE | dd of=$PARTITION bs=4M status=progress $parm
   
   # Добавление записи в NVRAM, если восстанавливаемый раздел это ESP
   PARTITION_INFO=$(sfdisk -d $DISK | grep $PARTITION.*C12A7328)
