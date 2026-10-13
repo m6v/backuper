@@ -120,6 +120,11 @@ restore_gpt() {
     return 2
   fi
   if sfdisk $DISK < $IMAGE; then
+    # Синхронизация геометрии диска с ядром Linux 
+    blockdev --rereadpt "$DISK"
+    # Принудительное пересоздание файлов разделов в /dev
+    udevadm trigger --settle
+    sleep 2
     echo "GPT has been successfully restored from $IMAGE"
    return 0
   fi
@@ -145,6 +150,7 @@ backup_part() {
   case "$part_type" in
     ext4|ext3|ext2)
       e2image -arpf $PARTITION - | gzip > $IMAGE
+      # e2image -arpf $PARTITION - | pigz -b 1024 > $IMAGE # если будет медленно, уменьшить степень сжатия в pigz, например, -1
       # e2image -arpf $PARTITION - | zstd -T0 > $IMAGE
       ;;
     swap)
@@ -182,17 +188,17 @@ restore_part() {
   fi
 
   echo "Restoring partition $PARTITION..."
-  # Определение типа диска и установка доп. параметра
+  # Определение типа диска и подготовка к копированию разреженного образа
   if [ $(cat /sys/block/$(basename $DISK)/queue/rotational) -eq 0 ]; then
     # Это SSD диск
-    blkdiscard $PARTITION
-    parm="conv=sparse"
+    blkdiscard "$PARTITION"
   else
     # Это HDD диск
-    parm="conv=fdatasync"
+    wipefs -a "$PARTITION"
   fi
-  gzip -dc $IMAGE | dd of=$PARTITION bs=4M status=progress $parm
-  # zstd -dc -T0 $IMAGE | dd of=$PARTITION bs=4M status=progress $parm
+  gzip -dc $IMAGE | dd of=$PARTITION bs=4M conv=fdatasync,sparse status=progress
+  # pigz -dc $IMAGE | dd of=$PARTITION bs=4M conv=fdatasync,sparse status=progress
+  # zstd -dc -T0 $IMAGE | dd of=$PARTITION bs=4M conv=fdatasync,sparse status=progress
   
   # Добавление записи в NVRAM, если восстанавливаемый раздел это ESP
   PARTITION_INFO=$(sfdisk -d $DISK | grep $PARTITION.*C12A7328)
