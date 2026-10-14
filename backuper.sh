@@ -3,7 +3,7 @@
 # Настройка переменных
 BASE_DIR="$(cd $(dirname $0) && pwd)"
 export PATH="$BASE_DIR:$PATH"
-export LD_LIBRARY_PATH="$BASE_DIR${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+export LD_LIBRARY_PATH="$BASE_DIR/lib:${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 
 # Диалог выбора дисков
 select_disk_dialog() {
@@ -45,9 +45,8 @@ select_partitions_dialog() {
     # Возврат стандартного разделителя строк
     unset IFS
 
-    # Выход, если массив пуст (на диск не размечен)
-    [ $# -eq 0 ] && return 1
-
+    [ $part_count -eq 0 ] && return 1
+    
     # Установка высоты внутренней рамки равной количеству разделов
     local list_height=$part_count
     
@@ -120,6 +119,11 @@ restore_gpt() {
     return 2
   fi
   if sfdisk $DISK < $IMAGE; then
+    # Синхронизация геометрии диска с ядром Linux 
+    blockdev --rereadpt "$DISK"
+    # Принудительное пересоздание файлов разделов в /dev
+    udevadm trigger --settle
+    sleep 2
     echo "GPT has been successfully restored from $IMAGE"
    return 0
   fi
@@ -135,23 +139,21 @@ backup_part() {
   fi
 
   mkdir -p $BASE_DIR/$HOSTNAME
-  IMAGE=$BASE_DIR/$HOSTNAME/$(basename $PARTITION).gz
+  IMAGE=$BASE_DIR/$HOSTNAME/$(basename $PARTITION).qcow2
 
   part_info=$(blkid | grep $PARTITION)
   part_type=$(echo "$part_info" | sed 's/.*TYPE="\([^"]*\).*/\1/')
 
   echo "Backuping $PARTITION..."
   case "$part_type" in
-    ext4|ext3|ext2)
-      e2image -arpf $PARTITION - | gzip > $IMAGE
-      ;;
     swap)
       echo "Skipped swap partition"
       ;;
     *)
-      dd if=$PARTITION bs=4M status=progress | gzip > $IMAGE
+      qemu-img convert -p -W -c -O qcow2 $PARTITION $IMAGE
       ;;
   esac
+  qemu-img check $IMAGE
 }
 
 restore_part() {
@@ -160,12 +162,6 @@ restore_part() {
   if mount | grep $PARTITION; then
     echo "Partition $PARTITION is mounted, skipped"
     return 1
-  fi
-
-  IMAGE=$BASE_DIR/$HOSTNAME/$(basename $PARTITION).gz
-  if [ ! -f $IMAGE ]; then
-    echo "Image $IMAGE is not found"
-    return 2
   fi
 
   # Для свопа выполнение форматирования вместо копировния
@@ -177,17 +173,24 @@ restore_part() {
     return 0
   fi
 
+  IMAGE=$BASE_DIR/$HOSTNAME/$(basename $PARTITION).qcow2
+  if [ ! -f $IMAGE ]; then
+    echo "Image $IMAGE is not found"
+    return 2
+  fi
+
   echo "Restoring partition $PARTITION..."
   # Определение типа диска и установка доп. параметра
   if [ $(cat /sys/block/$(basename $DISK)/queue/rotational) -eq 0 ]; then
     # Это SSD диск
+    echo "Discard blocks on $PARTITION"
     blkdiscard $PARTITION
-    parm="conv=sparse"
   else
     # Это HDD диск
-    parm="conv=fdatasync"
+    echo "Wipe signatures on $PARTITION"
+    wipefs -a "$PARTITION"
   fi
-  gzip -dc $IMAGE | dd of=$PARTITION bs=4M status=progress $parm
+  qemu-img convert -p -O raw $IMAGE $PARTITION
   
   # Добавление записи в NVRAM, если восстанавливаемый раздел это ESP
   PARTITION_INFO=$(sfdisk -d $DISK | grep $PARTITION.*C12A7328)
@@ -197,7 +200,6 @@ restore_part() {
 
   PARTITION_NUMBER="${PARTITION##*[a-zA-Z]}"
   PARTITION_UUID="${PARTITION_INFO#*uuid=}"
-  echo "Adding boot entry to NVRAM..."
   if ! efibootmgr -v | grep -iq $PARTITION_UUID; then
     efibootmgr -c -d $DISK -p $PARTITION_NUMBER -L 'astralinux' -l '\EFI\astralinux\grubx64.efi'
     echo "Boot entry added to NVRAM succefully"
@@ -207,50 +209,41 @@ restore_part() {
 }
 
 backup() {
-  DISK=$(select_disk_dialog)
-  if [ $? -ne 0 ]; then
+  if ! DISK=$(select_disk_dialog) || ! PARTITIONS=$(select_partitions_dialog "$DISK"); then
     echo "Backuping partition(s) canceled"
     return 1
   fi
 
-  PARTITIONS=$(select_partitions_dialog "$DISK")
   # Проверка, что выбран хотя бы один раздел
-  if [ -n "$PARTITIONS" ]; then
-
-    whiptail --title "Создание образов разделов" --infobox "Ждите завершения операции. Прогресс в строке состояния" 7 60
-    backup_gpt  "$DISK"
-    # Передача списка строк в цикл построчно
-    echo "$PARTITIONS" | while IFS= read -r PART; do
-      # Пропуск пустых строк
-      [ -z "$PART" ] && continue
-      backup_part $DISK $PART
-    done
-
-  else
+  if [ -z "$PARTITIONS" ]; then
     echo "No partitions selected"
   fi
+
+  whiptail --title "Создание образов разделов" --infobox "Ждите завершения операции. Прогресс в строке состояния" 7 60
+  backup_gpt  "$DISK"
+  # Передача списка строк в цикл построчно
+  echo "$PARTITIONS" | while IFS= read -r PART; do
+    backup_part $DISK $PART
+  done
 }
 
 restore() {
-  DISK=$(select_disk_dialog)
-  if [ $? -ne 0 ]; then
+  if ! DISK=$(select_disk_dialog) || ! PARTITIONS=$(select_partitions_dialog "$DISK"); then
     echo "Restoring partition(s) canceled"
     return 1
   fi
-
-  PARTITIONS=$(select_partitions_dialog "$DISK")
+  
   # Проверка, что выбран хотя бы один раздел
-  if [ -n "$PARTITIONS" ]; then
-    whiptail --title "Восстановление разделов из образов" --infobox "Ждите завершения операции. Прогресс в строке состояния" 7 60
-    # Передача списка строк в цикл построчно
-    echo "$PARTITIONS" | while IFS= read -r PART; do
-      # Пропуск пустых строк
-      [ -z "$PART" ] && continue
-      restore_part $DISK $PART
-    done
-  else
+  if [ -z "$PARTITIONS" ]; then
     echo "No partitions selected"
+    return 1
   fi
+
+  whiptail --title "Восстановление разделов из образов" --infobox "Ждите завершения операции. Прогресс в строке состояния" 7 60
+  # Передача списка строк в цикл построчно
+  echo "$PARTITIONS" | while IFS= read -r PART; do
+    restore_part $DISK $PART
+  done
 }
 
 while true; do
