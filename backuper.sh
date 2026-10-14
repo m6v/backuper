@@ -1,6 +1,5 @@
 #!/bin/sh
 
-# Настройка переменных
 BASE_DIR="$(cd $(dirname $0) && pwd)"
 export PATH="$BASE_DIR:$PATH"
 export LD_LIBRARY_PATH="$BASE_DIR/lib:${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
@@ -45,7 +44,11 @@ select_partitions_dialog() {
     # Возврат стандартного разделителя строк
     unset IFS
 
-    [ $part_count -eq 0 ] && return 1
+    # Выход, если на диске нет разделов
+    if [ $part_count -eq 0 ]; then
+      echo "No partitions found on $DISK. Please restore GPT from dump"
+      return 1
+    fi
     
     # Установка высоты внутренней рамки равной количеству разделов
     local list_height=$part_count
@@ -69,7 +72,7 @@ select_partitions_dialog() {
     '
     local selections
     selections=$(whiptail --title "Выбор разделов" \
-        --checklist "Выберите разделы для работы (Пробел - выбор, Enter - ОК):" \
+        --checklist "Выберите разделы (Пробел - выбор, Enter - ОК):" \
         $window_height 60 $list_height \
         --separate-output \
         "$@" 3>&1 1>&2 2>&3 </dev/tty)
@@ -85,17 +88,17 @@ select_partitions_dialog() {
 
 backup_gpt() {
   DISK=$1
-  echo "Backuping GPT of $DISK..."
-  mkdir -p $BASE_DIR/$HOSTNAME
-  IMAGE=$BASE_DIR/$HOSTNAME/$(basename $DISK).sf
+  echo "Backing up GPT of $DISK..."
+  mkdir -p $STORAGE
+  IMAGE=$STORAGE/$(basename $DISK).sf
 
   if ! sfdisk -d $DISK > $IMAGE; then
-    echo "Failed to backup GPT"
+    echo "Failed to dump GPT"
     return 1
   fi
-  echo "GPT has been successfully backed to $IMAGE"
+  echo "GPT dump saved to $IMAGE"
 
-  IMAGE=$BASE_DIR/$HOSTNAME/$(basename $DISK).fd
+  IMAGE=$STORAGE/$(basename $DISK).fd
   fdisk -l "$DISK" > $IMAGE
   echo "Partitions info saved to $IMAGE"
 }
@@ -107,24 +110,25 @@ restore_gpt() {
     return 1;
   fi
 
-  IMAGE=$BASE_DIR/$HOSTNAME/$(basename $DISK).sf
-  echo "Restoring GUID partition table of $DISK..."
+  IMAGE=$STORAGE/$(basename $DISK).sf
+  echo "Restoring GPT of $DISK..."
 
   if mount | grep ^$DISK; then
     echo "Device $DISK is busy"
     return 1
   fi
   if [ ! -f $IMAGE ]; then
-    echo "Dump of partition table $IMAGE is not found"
+    echo "GPT dump $IMAGE not found"
     return 2
   fi
+  # Восстановление GPT
   if sfdisk $DISK < $IMAGE; then
     # Синхронизация геометрии диска с ядром Linux 
     blockdev --rereadpt "$DISK"
     # Принудительное пересоздание файлов разделов в /dev
     udevadm trigger --settle
     sleep 2
-    echo "GPT has been successfully restored from $IMAGE"
+    echo "GPT restored successfully"
    return 0
   fi
   echo "Failed to restore GPT"
@@ -134,12 +138,12 @@ backup_part() {
   DISK=$1
   PARTITION=$2
   if mount | grep $PARTITION; then
-    echo "Partition $PARTITION is mounted, backup skipped"
+    echo "Partition $PARTITION is mounted. Skipping backup"
     return 1
   fi
 
-  mkdir -p $BASE_DIR/$HOSTNAME
-  IMAGE=$BASE_DIR/$HOSTNAME/$(basename $PARTITION).qcow2
+  mkdir -p $STORAGE
+  IMAGE=$STORAGE/$(basename $PARTITION).qcow2
 
   part_info=$(blkid | grep $PARTITION)
   part_type=$(echo "$part_info" | sed 's/.*TYPE="\([^"]*\).*/\1/')
@@ -160,7 +164,7 @@ restore_part() {
   DISK=$1
   PARTITION=$2
   if mount | grep $PARTITION; then
-    echo "Partition $PARTITION is mounted, skipped"
+    echo "Partition $PARTITION is mounted. Skipped"
     return 1
   fi
 
@@ -168,12 +172,12 @@ restore_part() {
   part_info=$(blkid | grep $PARTITION)
   part_type=$(echo "$part_info" | sed 's/.*TYPE="\([^"]*\).*/\1/')
   if [ part_type = "swap" ]; then
-    echo "Formating swap partition $PARTITION..."
+    echo "Formatting swap partition $PARTITION..."
     mkswap $PARTITION
     return 0
   fi
 
-  IMAGE=$BASE_DIR/$HOSTNAME/$(basename $PARTITION).qcow2
+  IMAGE=$STORAGE/$(basename $PARTITION).qcow2
   if [ ! -f $IMAGE ]; then
     echo "Image $IMAGE is not found"
     return 2
@@ -204,23 +208,24 @@ restore_part() {
     efibootmgr -c -d $DISK -p $PARTITION_NUMBER -L 'astralinux' -l '\EFI\astralinux\grubx64.efi'
     echo "Boot entry added to NVRAM succefully"
   else
-    echo "Boot entry already exists in NVRAM, skipped"
+    echo "Boot entry already exists in NVRAM. Skipped"
   fi
 }
 
 backup() {
   if ! DISK=$(select_disk_dialog) || ! PARTITIONS=$(select_partitions_dialog "$DISK"); then
-    echo "Backuping partition(s) canceled"
+    echo "Operation cancelled"
     return 1
   fi
 
   # Проверка, что выбран хотя бы один раздел
   if [ -z "$PARTITIONS" ]; then
-    echo "No partitions selected"
+    echo "No partitions selected. Operation cancelled"
+    return 1
   fi
 
-  whiptail --title "Создание образов разделов" --infobox "Ждите завершения операции. Прогресс в строке состояния" 7 60
   backup_gpt  "$DISK"
+  whiptail --title "Создание образов разделов" --infobox "Ждите завершения операции. Прогресс в строке состояния" 7 60
   # Передача списка строк в цикл построчно
   echo "$PARTITIONS" | while IFS= read -r PART; do
     backup_part $DISK $PART
@@ -229,13 +234,13 @@ backup() {
 
 restore() {
   if ! DISK=$(select_disk_dialog) || ! PARTITIONS=$(select_partitions_dialog "$DISK"); then
-    echo "Restoring partition(s) canceled"
+    echo "Operation canceled"
     return 1
   fi
   
   # Проверка, что выбран хотя бы один раздел
   if [ -z "$PARTITIONS" ]; then
-    echo "No partitions selected"
+    echo "No partitions selected. Operation cancelled"
     return 1
   fi
 
@@ -254,8 +259,10 @@ while true; do
     break
   fi
   whiptail --title "Error" --msgbox "Недопустимое имя хоста '$HOSTNAME'. Повторите ввод" 0 60
-
 done
+
+# Каталог для хранения образов хоста
+STORAGE=$BASE_DIR/$HOSTNAME
 
 while true; do
   menu=$(whiptail --title "Главное меню" --menu "Выбор действия для $HOSTNAME:" 0 60 0 \
