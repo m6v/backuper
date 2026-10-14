@@ -139,36 +139,18 @@ backup_part() {
   fi
 
   mkdir -p $BASE_DIR/$HOSTNAME
-<<<<<<< HEAD
   IMAGE=$BASE_DIR/$HOSTNAME/$(basename $PARTITION).qcow2
-=======
-  IMAGE=$BASE_DIR/$HOSTNAME/$(basename $PARTITION).gz
-  # IMAGE=$BASE_DIR/$HOSTNAME/$(basename $PARTITION).zst
->>>>>>> b1aae8acf81d4e0aabfd2a4fd47f06b972da67c0
 
   part_info=$(blkid | grep $PARTITION)
   part_type=$(echo "$part_info" | sed 's/.*TYPE="\([^"]*\).*/\1/')
 
   echo "Backuping $PARTITION..."
   case "$part_type" in
-<<<<<<< HEAD
-=======
-    ext4|ext3|ext2)
-      e2image -arpf $PARTITION - | gzip > $IMAGE
-      # e2image -arpf $PARTITION - | pigz -b 1024 > $IMAGE # если будет медленно, уменьшить степень сжатия в pigz, например, -1
-      # e2image -arpf $PARTITION - | zstd -T0 > $IMAGE
-      ;;
->>>>>>> b1aae8acf81d4e0aabfd2a4fd47f06b972da67c0
     swap)
       echo "Skipped swap partition"
       ;;
     *)
-<<<<<<< HEAD
       qemu-img convert -p -W -c -O qcow2 $PARTITION $IMAGE
-=======
-      dd if=$PARTITION bs=4M status=progress | gzip > $IMAGE
-      # dd if=$PARTITION bs=4M status=progress | zstd -T0 > $IMAGE
->>>>>>> b1aae8acf81d4e0aabfd2a4fd47f06b972da67c0
       ;;
   esac
   qemu-img check $IMAGE
@@ -182,16 +164,6 @@ restore_part() {
     return 1
   fi
 
-<<<<<<< HEAD
-=======
-  IMAGE=$BASE_DIR/$HOSTNAME/$(basename $PARTITION).gz
-  # IMAGE=$BASE_DIR/$HOSTNAME/$(basename $PARTITION).zst
-  if [ ! -f $IMAGE ]; then
-    echo "Image $IMAGE is not found"
-    return 2
-  fi
-
->>>>>>> b1aae8acf81d4e0aabfd2a4fd47f06b972da67c0
   # Для свопа выполнение форматирования вместо копировния
   part_info=$(blkid | grep $PARTITION)
   part_type=$(echo "$part_info" | sed 's/.*TYPE="\([^"]*\).*/\1/')
@@ -208,10 +180,9 @@ restore_part() {
   fi
 
   echo "Restoring partition $PARTITION..."
-  # Определение типа диска и подготовка к копированию разреженного образа
+  # Определение типа диска и установка доп. параметра
   if [ $(cat /sys/block/$(basename $DISK)/queue/rotational) -eq 0 ]; then
     # Это SSD диск
-<<<<<<< HEAD
     echo "Discard blocks on $PARTITION"
     blkdiscard $PARTITION
   else
@@ -220,16 +191,6 @@ restore_part() {
     wipefs -a "$PARTITION"
   fi
   qemu-img convert -p -O raw $IMAGE $PARTITION
-=======
-    blkdiscard "$PARTITION"
-  else
-    # Это HDD диск
-    wipefs -a "$PARTITION"
-  fi
-  gzip -dc $IMAGE | dd of=$PARTITION bs=4M conv=fdatasync,sparse status=progress
-  # pigz -dc $IMAGE | dd of=$PARTITION bs=4M conv=fdatasync,sparse status=progress
-  # zstd -dc -T0 $IMAGE | dd of=$PARTITION bs=4M conv=fdatasync,sparse status=progress
->>>>>>> b1aae8acf81d4e0aabfd2a4fd47f06b972da67c0
   
   # Добавление записи в NVRAM, если восстанавливаемый раздел это ESP
   PARTITION_INFO=$(sfdisk -d $DISK | grep $PARTITION.*C12A7328)
