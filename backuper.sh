@@ -4,6 +4,18 @@ BASE_DIR="$(cd $(dirname $0) && pwd)"
 export PATH="$BASE_DIR:$PATH"
 export LD_LIBRARY_PATH="$BASE_DIR/lib:${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 
+DEBUG=True
+# Функция-обертка для пропуска команд в режиме отладки
+run() {
+  if [ -n "$DEBUG" ]; then
+    # Вывод команды вместо выполнения
+    echo -e "\e[1;33m$*\e[0m"
+  else
+    # Выполнение команды
+    eval "$@"
+  fi
+}
+
 # Диалог выбора дисков
 select_disk_dialog() {
   items=$(fdisk -l | grep -E "^(Disk|Диск) /dev" | cut -d" " -f2 | sed "s/:.*/ -/")
@@ -89,17 +101,17 @@ select_partitions_dialog() {
 backup_gpt() {
   DISK=$1
   echo "Backing up GPT of $DISK..."
-  mkdir -p $STORAGE
+  run 'mkdir -p $STORAGE'
   IMAGE=$STORAGE/$(basename $DISK).sf
 
-  if ! sfdisk -d $DISK > $IMAGE; then
+  if ! run 'sfdisk -d $DISK > $IMAGE'; then
     echo "Failed to dump GPT"
     return 1
   fi
   echo "GPT dump saved to $IMAGE"
 
   IMAGE=$STORAGE/$(basename $DISK).fd
-  fdisk -l "$DISK" > $IMAGE
+  run 'fdisk -l "$DISK" > $IMAGE'
   echo "Partitions info saved to $IMAGE"
 }
 
@@ -113,7 +125,7 @@ restore_gpt() {
   IMAGE=$STORAGE/$(basename $DISK).sf
   echo "Restoring GPT of $DISK..."
 
-  if mount | grep ^$DISK; then
+  if mount | grep -q ^$DISK; then
     echo "Device $DISK is busy"
     return 1
   fi
@@ -122,11 +134,11 @@ restore_gpt() {
     return 2
   fi
   # Восстановление GPT
-  if sfdisk $DISK < $IMAGE; then
+  if run 'sfdisk $DISK < $IMAGE'; then
     # Синхронизация геометрии диска с ядром Linux 
-    blockdev --rereadpt "$DISK"
+    run 'blockdev --rereadpt "$DISK"'
     # Принудительное пересоздание файлов разделов в /dev
-    udevadm trigger --settle
+    run 'udevadm trigger --settle'
     sleep 2
     echo "GPT restored successfully"
    return 0
@@ -137,12 +149,12 @@ restore_gpt() {
 backup_part() {
   DISK=$1
   PARTITION=$2
-  if mount | grep $PARTITION; then
+  if mount | grep -q $PARTITION; then
     echo "Partition $PARTITION is mounted. Skipping backup"
     return 1
   fi
 
-  mkdir -p $STORAGE
+  run 'mkdir -p $STORAGE'
   IMAGE=$STORAGE/$(basename $PARTITION).qcow2
 
   part_info=$(blkid | grep $PARTITION)
@@ -154,16 +166,16 @@ backup_part() {
       echo "Skipped swap partition"
       ;;
     *)
-      qemu-img convert -p -W -c -O qcow2 $PARTITION $IMAGE
+      run 'qemu-img convert -p -W -c -O qcow2 $PARTITION $IMAGE'
       ;;
   esac
-  qemu-img check $IMAGE
+  run 'qemu-img check $IMAGE'
 }
 
 restore_part() {
   DISK=$1
   PARTITION=$2
-  if mount | grep $PARTITION; then
+  if mount | grep -q $PARTITION; then
     echo "Partition $PARTITION is mounted. Skipped"
     return 1
   fi
@@ -173,7 +185,7 @@ restore_part() {
   part_type=$(echo "$part_info" | sed 's/.*TYPE="\([^"]*\).*/\1/')
   if [ part_type = "swap" ]; then
     echo "Formatting swap partition $PARTITION..."
-    mkswap $PARTITION
+    run 'mkswap $PARTITION'
     return 0
   fi
 
@@ -188,13 +200,13 @@ restore_part() {
   if [ $(cat /sys/block/$(basename $DISK)/queue/rotational) -eq 0 ]; then
     # Это SSD диск
     echo "Discard blocks on $PARTITION"
-    blkdiscard $PARTITION
+    run 'blkdiscard $PARTITION'
   else
     # Это HDD диск
     echo "Wipe signatures on $PARTITION"
-    wipefs -a "$PARTITION"
+    run 'wipefs -a "$PARTITION"'
   fi
-  qemu-img convert -p -O raw $IMAGE $PARTITION
+  run 'qemu-img convert -p -O raw $IMAGE $PARTITION'
   
   # Добавление записи в NVRAM, если восстанавливаемый раздел это ESP
   PARTITION_INFO=$(sfdisk -d $DISK | grep $PARTITION.*C12A7328)
@@ -205,7 +217,7 @@ restore_part() {
   PARTITION_NUMBER="${PARTITION##*[a-zA-Z]}"
   PARTITION_UUID="${PARTITION_INFO#*uuid=}"
   if ! efibootmgr -v | grep -iq $PARTITION_UUID; then
-    efibootmgr -c -d $DISK -p $PARTITION_NUMBER -L 'astralinux' -l '\EFI\astralinux\grubx64.efi'
+    run 'efibootmgr -c -d $DISK -p $PARTITION_NUMBER -L "astralinux" -l "\EFI\astralinux\grubx64.efi"'
     echo "Boot entry added to NVRAM succefully"
   else
     echo "Boot entry already exists in NVRAM. Skipped"
