@@ -4,7 +4,7 @@ BASE_DIR="$(cd $(dirname $0) && pwd)"
 export PATH="$BASE_DIR:$PATH"
 export LD_LIBRARY_PATH="$BASE_DIR/lib:${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 
-DEBUG=True
+DEBUG=""
 # Функция-обертка для пропуска команд в режиме отладки
 run() {
   if [ -n "$DEBUG" ]; then
@@ -169,7 +169,9 @@ backup_part() {
       run 'qemu-img convert -p -W -c -O qcow2 $PARTITION $IMAGE'
       ;;
   esac
-  run 'qemu-img check $IMAGE'
+  if [ -f $IMAGE ]; then
+    run 'qemu-img check $IMAGE'
+  fi
 }
 
 restore_part() {
