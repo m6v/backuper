@@ -1,4 +1,39 @@
++ Сделать файл(ы) с контрольными суммами всех создаваемых файлов
 + Сделать меню с выводом справки
 + Сделать функцию запуска программы testdisk
 + Продумать возможность использования программы testdisk, которая позволяет проверять разделы, создавать резервные копии и т.п.;
 + Рассмотреть необходимость использования диалога выбора файлов (Whiptail bash script directory browser and File Selector)[https://github.com/pageauc/filebrowser]
++ Добавить функцию проверки раздела, например,
+`e2fsck -p $PART_NAME`
++ Добавить функцию смены пароля, например,
+```
+change_passwd() {
+    PART_NAME=$(whippart "Выберите корневой раздел ОС")
+    if [ $? -eq 0 ];  then
+        mount $PART_NAME $ROOT_DIR
+
+        items=$(grep /bin/bash ${ROOT_DIR}/etc/passwd | sed 's/:.*/ -/')
+        result=$(whiptail --title "Выберите пользователя" --menu "" --cancel-button "Отмена" --noitem 0 50 0 $items 3>&1 1>&2 2>&3)   
+        if [ $? -eq 0 ];  then
+            USER_NAME=$(echo $items | cut -d' ' -f$(expr $result \* 2))
+            PASSWORD=$(whiptail --title "Введите новый пароль пользователя $USER_NAME" --passwordbox " " 10 50 3>&1 1>&2 2>&3)
+            if [ $? -eq 0 ];  then
+                chroot $ROOT_DIR /bin/bash -c "echo ${USER_NAME}:${PASSWORD} | /usr/sbin/chpasswd"
+            fi
+        fi
+
+        umount $ROOT_DIR
+    fi
+}
+```
++ Добавить функцию сброса счетчика неудачных попыток входа
+```
+reset_faillog() {
+    PART_NAME=$(whippart "Выберите корневой раздел ОС")
+    if [ $? -eq 0 ];  then
+        mount $PART_NAME $ROOT_DIR
+        chroot $ROOT_DIR /usr/bin/faillog -r
+        umount $ROOT_DIR
+    fi
+}
+```
