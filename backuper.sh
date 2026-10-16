@@ -5,7 +5,7 @@ export PATH="$BASE_DIR:$PATH"
 export LD_LIBRARY_PATH="$BASE_DIR/lib:${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 
 DEBUG=""
-# Функция-обертка для пропуска команд в режиме отладки
+# Обертка для пропуска команд в режиме отладки
 run() {
   if [ -n "$DEBUG" ]; then
     # Вывод команды вместо выполнения
@@ -59,6 +59,7 @@ select_partitions_dialog() {
     # Выход, если на диске нет разделов
     if [ $part_count -eq 0 ]; then
       echo "No partitions found on $DISK. Please restore GPT from dump"
+      #TODO Добавить вывод диалога с предложением восстановить GPT (если файл $DISK.sf в наличии)
       return 1
     fi
     
@@ -160,13 +161,30 @@ backup_part() {
   part_info=$(blkid | grep $PARTITION)
   part_type=$(echo "$part_info" | sed 's/.*TYPE="\([^"]*\).*/\1/')
 
-  echo "Backuping $PARTITION..."
   case "$part_type" in
     swap)
-      echo "Skipped swap partition"
+      echo "Skipped swap $PARTITION"
       ;;
     *)
-      run 'qemu-img convert -p -W -c -O qcow2 $PARTITION $IMAGE'
+      run 'mkdir -p /tmp/trim'
+      run 'mount $PARTITION /tmp/trim'
+
+      # Проверка поддержки диском триммирования
+      if [ "$(cat /sys/block/$(basename $DISK)/queue/discard_max_bytes 2>/dev/null)" -gt 0 ]; then
+        echo "Trimming free space on $PARTITION..."
+        run 'fstrim -v /tmp/trim 2>/dev/null || true'
+      else
+        # NB! Для vfat при превышении размера файла 4ГБ завершится с ошибкой "File too large"
+        echo "Writing zeroes to clear free space on $PARTITION..."
+        run 'dd if=/dev/zero of=/tmp/trim/zero bs=4M status=progress 2>/dev/null || true'
+        run 'rm /tmp/trim/zero'
+      fi
+      run 'umount /tmp/trim'
+      run 'sync'
+      run 'udevadm settle'
+
+      echo "Backuping $PARTITION..."
+      run 'qemu-img convert -p -W -c -o compression_type=zstd -O qcow2 $PARTITION $IMAGE'
       ;;
   esac
   if [ -f $IMAGE ]; then
@@ -197,17 +215,20 @@ restore_part() {
     return 2
   fi
 
-  echo "Restoring partition $PARTITION..."
   # Определение типа диска и установка доп. параметра
   if [ $(cat /sys/block/$(basename $DISK)/queue/rotational) -eq 0 ]; then
     # Это SSD диск
     echo "Discard blocks on $PARTITION"
     run 'blkdiscard $PARTITION'
+    parm=""
   else
     # Это HDD диск
     echo "Wipe signatures on $PARTITION"
     run 'wipefs -a "$PARTITION"'
+    # Disable sparse detection to enforce fast sequential write on HDD
+    parm="-S 0"
   fi
+  echo "Restoring partition $PARTITION..."
   run 'qemu-img convert -p -O raw $IMAGE $PARTITION'
   
   # Добавление записи в NVRAM, если восстанавливаемый раздел это ESP
