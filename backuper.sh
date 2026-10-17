@@ -283,6 +283,12 @@ restore() {
     return 1
   fi
 
+  whiptail --title "Внимание" --yesno "Все данные на восстанавливаемых разделах будут уничтожены! Продолжить?" 8 60
+  if [ $? -ne 0 ]; then
+    echo "Operation canceled by user"
+    return 1
+  fi
+
   whiptail --title "Восстановление разделов из образов" --infobox "Ждите завершения операции. Прогресс в строке состояния" 7 60
   # Передача списка строк в цикл построчно
   echo "$PARTITIONS" | while IFS= read -r PART; do
