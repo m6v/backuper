@@ -26,12 +26,14 @@ select_disk_dialog() {
 # Диалог выбора разделов на диске
 select_partitions_dialog() {
     local DISK="$1"
-    
+
     # Быстрые проверки на входе
     [ -z "$DISK" ] && return 1
 
     local partitions_info=$(fdisk -l 2>/dev/null | grep "^$DISK" | tr -s " ")
-    [ -z "$partitions_info" ] && return 1
+    if [ -z "$partitions_info" ]; then
+      return 0
+    fi
 
     # Склеивание строк с разделителем '|' для обработки в цикле
     local lines_pipeline=$(echo "$partitions_info" | tr '\n' '|')
@@ -56,16 +58,9 @@ select_partitions_dialog() {
     # Возврат стандартного разделителя строк
     unset IFS
 
-    # Выход, если на диске нет разделов
-    if [ $part_count -eq 0 ]; then
-      echo "No partitions found on $DISK. Please restore GPT from dump"
-      #TODO Добавить вывод диалога с предложением восстановить GPT (если файл $DISK.sf в наличии)
-      return 1
-    fi
-    
     # Установка высоты внутренней рамки равной количеству разделов
     local list_height=$part_count
-    
+
     # Установка высоты окна (количество строк + 7 строк на заголовок и кнопки)
     local window_height=$(( part_count + 7 ))
 
@@ -224,13 +219,16 @@ restore_part() {
   else
     # Это HDD диск
     echo "Wipe signatures on $PARTITION"
-    run 'wipefs -a "$PARTITION"'
+    # run 'wipefs -a "$PARTITION"' # wipefs is absent in rescue mode
+    dd if=/dev/zero of="$PARTITION" bs=1M count=16 status=none
+    sync
+
     # Disable sparse detection to enforce fast sequential write on HDD
     parm="-S 0"
   fi
   echo "Restoring partition $PARTITION..."
   run 'qemu-img convert -p -O raw $IMAGE $PARTITION'
-  
+
   # Добавление записи в NVRAM, если восстанавливаемый раздел это ESP
   PARTITION_INFO=$(sfdisk -d $DISK | grep $PARTITION.*C12A7328)
   if [ -z "$PARTITION_INFO" ]; then
@@ -249,7 +247,7 @@ restore_part() {
 
 backup() {
   if ! DISK=$(select_disk_dialog) || ! PARTITIONS=$(select_partitions_dialog "$DISK"); then
-    echo "Operation cancelled"
+    echo "Operation cancelled by user"
     return 1
   fi
 
@@ -269,10 +267,16 @@ backup() {
 
 restore() {
   if ! DISK=$(select_disk_dialog) || ! PARTITIONS=$(select_partitions_dialog "$DISK"); then
-    echo "Operation canceled"
+    echo "Operation canceled by user"
     return 1
   fi
-  
+
+  if [ -z $PARTITIONS ]; then
+    echo "No partitions found on $DISK. Please restore GPT from dump"
+    whiptail --title "Внимание" --infobox "На диске $DISK нет разделов. Восстановите таблицу разделов (GPT)" 7 60
+    return 1
+  fi
+
   # Проверка, что выбран хотя бы один раздел
   if [ -z "$PARTITIONS" ]; then
     echo "No partitions selected. Operation cancelled"
@@ -284,6 +288,9 @@ restore() {
   echo "$PARTITIONS" | while IFS= read -r PART; do
     restore_part $DISK $PART
   done
+
+  echo "Forcing kernel to rescan partition table and refresh cache..."
+  echo "change" > /sys/class/block/$(basename $DISK)/uevent
 }
 
 while true; do
