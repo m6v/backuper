@@ -38,7 +38,7 @@ select_disk_dialog() {
             sd*|nvme*|mmcblk*|hd*|vd*) ;;
             *) continue ;;
         esac
-        
+
         # Чтение модели диска из device/model или device/name (для mmcblk)
         disk_model=""
         if [ -f "$disk_path/device/model" ]; then
@@ -52,16 +52,16 @@ select_disk_dialog() {
 
         disk_size=$(sectors2gb $(cat /sys/block/$disk_name/size))
 
-        # Добавление дуплета в аргументы
-        set -- "$@" "$disk_name" "$disk_model ($disk_size)"
+        # Добавление дуплета в аргументы для whiptail
+        set -- "$@" "/dev/$disk_name" "$disk_model ($disk_size)"
     done
-    
+
     [ $# -eq 0 ] && return 1
-    
-    disk_name=$(whiptail --title "Выбор диска" --menu "" 0 60 0 "$@" 3>&1 1>&2 2>&3)
+
+    selection=$(whiptail --title "Выбор диска" --menu "Выберите диск (Enter - OK):" 0 60 0 "$@" 3>&1 1>&2 2>&3)
     # Возврат выбранного диска, если нажата <OK>
-    if [ $? -eq 0 ] && [ -n "$disk_name" ]; then
-        echo "$disk_name"
+    if [ $? -eq 0 ] && [ -n "$selection" ]; then
+        echo "$selection"
         return 0
     else
         return 1
@@ -70,8 +70,7 @@ select_disk_dialog() {
 
 # Диалог выбора разделов
 select_partitions_dialog() {
-    local disk_name="$1"
-    [ -z "$DISK" ] && return 1
+    local disk_name=$(basename $1)
 
     # Проверка наличия диска в системе
     if [ ! -d "/sys/block/$disk_name" ]; then
@@ -106,8 +105,8 @@ select_partitions_dialog() {
         fi
         [ -z "$part_type" ] && part_type="Unknown"
 
-        # Добавление параметров для whiptail
-        set -- "$@" "$partition" "$part_type $size_str" "ON"
+        # Добавление триплета в аргументы для whiptail
+        set -- "$@" "$partition" "$part_type ($size_str)" "ON"
         part_count=$(( part_count + 1 ))
     done
 
@@ -135,7 +134,7 @@ select_partitions_dialog() {
     local selections
     selections=$(whiptail --title "Выбор разделов" \
         --checklist "Выберите разделы (Пробел - выбор, Enter - ОК):" \
-        $window_height 65 $list_height \
+        $window_height 60 $list_height \
         --separate-output \
         "$@" 3>&1 1>&2 2>&3)
 
@@ -147,11 +146,15 @@ select_partitions_dialog() {
     fi
 }
 
-# DISK=$(select_disk_dialog)
-# if [ -n $DISK ]; then
-#   select_partitions_dialog $DISK
-# fi
-# exit 0
+# Тест диалогов выбора дисков и разделов
+if true; then
+    DISK=$(select_disk_dialog)
+    echo $DISK
+    if [ -n "$DISK" ]; then
+        select_partitions_dialog $DISK
+    fi
+exit 0
+fi
 
 backup_gpt() {
     DISK=$1
@@ -278,17 +281,15 @@ restore_part() {
 
     # Определение типа диска и установка доп. параметра
     if [ $(cat /sys/block/$(basename $DISK)/queue/rotational) -eq 0 ]; then
-        # Это SSD диск
+        # Это SSD
         echo "Discard blocks on $PARTITION"
         run 'blkdiscard $PARTITION'
         parm=""
     else
-        # Это HDD диск
+        # Это HDD
         echo "Wipe signatures on $PARTITION"
-        # run 'wipefs -a "$PARTITION"' # wipefs is absent in rescue mode
         dd if=/dev/zero of="$PARTITION" bs=1M count=16 status=none
         sync
-
         # Disable sparse detection to enforce fast sequential write on HDD
         parm="-S 0"
     fi
@@ -398,5 +399,6 @@ while true; do
 
     printf "Press any key to continue..."
     read -s -n 1 dummy
+    echo
 
 done
