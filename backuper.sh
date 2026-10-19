@@ -147,7 +147,7 @@ select_partitions_dialog() {
 }
 
 # Тест диалогов выбора дисков и разделов
-if true; then
+if false; then
     DISK=$(select_disk_dialog)
     echo $DISK
     if [ -n "$DISK" ]; then
