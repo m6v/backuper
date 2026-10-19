@@ -11,6 +11,46 @@ mount /dev/disk/by-label/BACKUP /mnt
 В Linux можно использовать специальную функцию компилятора objcopy, которая превращает любой файл, например, архив с вашим скриптом, в объектный бинарный файл (.o), а затем мы слинковать его с кодом на C.
 В итоге получится настоящий бинарный файл (ELF), внутри которого намертво зашит сжатый архив. При запуске программа распакует его в оперативную память или /tmp, выполнит скрипт, передав ему $CURRENT_PWD, и корректно завершится.
 
+## Подготовка среды на подключаемом диске для выполнения в нее chroot из среды восстановления
+```
+# Монтирование диска восстановления
+sudo mount /dev/disk/by-label/BACKUP /mnt
+
+# Создание необходимой структуры каталогов
+mkdir -p /mnt/bin /mnt/lib/x86_64-linux-gnu /mnt/lib64
+
+# Копирование бинарника busybox и создание ссылки на оболочку sh
+cp /usr/bin/busybox /mnt/bin/busybox
+ln -sf /bin/busybox /mnt/bin/sh
+
+# Копирование загрузчика (интерпретатора)
+cp /lib64/ld-linux-x86-64.so.2 /mnt/lib64/
+
+# Копирование зависимостей busybox
+cp /lib/x86_64-linux-gnu/libresolv.so.2 /mnt/lib/x86_64-linux-gnu/
+cp /lib/x86_64-linux-gnu/libc.so.6 /mnt/lib/x86_64-linux-gnu/
+
+# Вход в chroot среду
+sudo chroot /mnt /bin/sh
+
+# Содание симлинков на встроенные утилиты BusyBox (выполнять внутри)
+/bin/busybox --install -s /bin
+```
+
+Среда восстановления перед передачей управления пробрасывает в точку монтирования виртуальные файловые системы, но вообще , если нужно сделать это внутри chroot, то порядок следующий
+```
+mkdir /dev /proc /sys
+mount -t devtmpfs devtmpfs /dev
+mount -t proc proc /proc
+mount -t sysfs sysfs /sys
+
+mkdir -p /dev/pts
+mount -t devpts devpts /dev/pts
+
+mkdir -p /sys/firmware/efi/efivars
+mkdir -t efivarfs efivarfs /sys/firmware/efi/efivars
+```
+
 ## Функция поиска на дисках EFI System partition и добавления в NVRAM записи
 ```
 # Функция ищет на дисках EFI System partition и добавляет в NVRAM запись,

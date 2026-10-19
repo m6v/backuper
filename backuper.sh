@@ -318,7 +318,6 @@ backup() {
         return 1
     fi
 
-    # Проверка, что выбран хотя бы один раздел
     if [ -z "$PARTITIONS" ]; then
         echo "No partitions selected. Operation cancelled"
         return 1
@@ -344,7 +343,6 @@ restore() {
         return 1
     fi
 
-    # Проверка, что выбран хотя бы один раздел
     if [ -z "$PARTITIONS" ]; then
         echo "No partitions selected. Operation cancelled"
         return 1
