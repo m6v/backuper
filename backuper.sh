@@ -16,61 +16,114 @@ run() {
     fi
 }
 
-# Диалог выбора дисков
-select_disk_dialog() {
-    items=$(fdisk -l | grep -E "^(Disk|Диск) /dev" | cut -d" " -f2 | sed "s/:.*/ -/")
-    whiptail --title "Выбор диска" --menu "$1" --noitem 0 60 0 $items 3>&1 1>&2 2>&3
-    return $?
+# Перевод размера диска (раздела) в секторах в ГБ
+sectors2gb() {
+    local sectors=$1
+    [ -z "$sectors" ] && echo ""
+    local gb_int=$(( sectors / 2097152 ))
+    local gb_rem=$(( (sectors % 2097152) * 10 / 2097152 ))
+    echo "${gb_int}.${gb_rem} ГБ"
 }
 
-# Диалог выбора разделов на диске
-select_partitions_dialog() {
-    local DISK="$1"
+# Диалог выбора дисков
+select_disk_dialog() {
+    set --
 
-    # Быстрые проверки на входе
+    for disk_path in /sys/block/*; do
+        # Проверка, что это ссылка/директория, а не случайный файл
+        [ -e "$disk_path" ] || continue
+
+        disk_name=$(basename $disk_path)
+        case $disk_name in
+            sd*|nvme*|mmcblk*|hd*|vd*) ;;
+            *) continue ;;
+        esac
+        
+        # Чтение модели диска из device/model или device/name (для mmcblk)
+        disk_model=""
+        if [ -f "$disk_path/device/model" ]; then
+            disk_model=$(cat "$disk_path/device/model" 2>/dev/null)
+        elif [ -f "$disk_path/device/name" ]; then
+            disk_model=$(cat "$disk_path/device/name" 2>/dev/null)
+        fi
+        # Удаление лишних пробелов в начале/конце
+        disk_model=$(echo $disk_model) 
+        [ -z "$disk_model" ] && model="Unknown"
+
+        disk_size=$(sectors2gb $(cat /sys/block/$disk_name/size))
+
+        # Добавление дуплета в аргументы
+        set -- "$@" "$disk_name" "$disk_model ($disk_size)"
+    done
+    
+    [ $# -eq 0 ] && return 1
+    
+    disk_name=$(whiptail --title "Выбор диска" --menu "" 0 60 0 "$@" 3>&1 1>&2 2>&3)
+    # Возврат выбранного диска, если нажата <OK>
+    if [ $? -eq 0 ] && [ -n "$disk_name" ]; then
+        echo "$disk_name"
+        return 0
+    else
+        return 1
+    fi
+}
+
+# Диалог выбора разделов
+select_partitions_dialog() {
+    local disk_name="$1"
     [ -z "$DISK" ] && return 1
 
-    local partitions_info=$(fdisk -l 2>/dev/null | grep "^$DISK" | tr -s " ")
-    if [ -z "$partitions_info" ]; then
-        return 0
+    # Проверка наличия диска в системе
+    if [ ! -d "/sys/block/$disk_name" ]; then
+        return 1
     fi
 
-    # Склеивание строк с разделителем '|' для обработки в цикле
-    local lines_pipeline=$(echo "$partitions_info" | tr '\n' '|')
-
-    # Очистка позиционных параметров, переданных скрипту при запуске
+    # Очистка позиционных параметров
     set -- 
 
-    # Установка нового разделителя строк
-    local IFS='|'
     # Счетчик разделов
     local part_count=0
-    for line in $lines_pipeline; do
-        [ -z "$line" ] && continue
-        # Извлечение имени раздела (1-е поле) и описания (с 5-го поля до конца)
-        local partition=$(echo "$line" | cut -d" " -f1)
-        local description=$(echo "$line" | cut -d" " -f5-)
-        # Добавление нового триплета к списку параметров для последующей передачи whiptail
-        set -- "$@" "$partition" "$description" "ON"
+
+    # Перебираем папки разделов внутри /sys/block/имя_диска/
+    for part_dir in /sys/block/"$disk_name"/"$disk_name"* /sys/block/"$disk_name"/p[0-9]*; do
+        [ ! -d "$part_dir" ] && continue
+
+        local part_name=$(basename $part_dir)
+        local partition="/dev/$part_name"
+
+        # Определение размера раздела
+        size_str=$(sectors2gb $(cat "$part_dir/size" 2>/dev/null))
+
+        # Определение типа раздела
+        local part_type=""
+        if [ -f "$part_dir/uevent" ]; then
+            # Основной способ
+            part_type=$(grep -E "PARTNAME|PARTTYPE_NAME" "$part_dir/uevent" | head -n 1 | cut -d'=' -f2)
+            # Запасной способ
+            if [ -z "$part_type" ]; then
+                part_type=$(blkid "$partition" 2>/dev/null | grep -o 'TYPE="[^"]*"' | cut -d'"' -f2)
+            fi
+        fi
+        [ -z "$part_type" ] && part_type="Unknown"
+
+        # Добавление параметров для whiptail
+        set -- "$@" "$partition" "$part_type $size_str" "ON"
         part_count=$(( part_count + 1 ))
     done
 
-    # Возврат стандартного разделителя строк
-    unset IFS
+    if [ "$part_count" -eq 0 ]; then
+        return 0
+    fi
 
-    # Установка высоты внутренней рамки равной количеству разделов
+    # Установка высоты внутренней рамки и окна
     local list_height=$part_count
-
-    # Установка высоты окна (количество строк + 7 строк на заголовок и кнопки)
     local window_height=$(( part_count + 7 ))
 
-    # Ограничение высоты списка и окна значениями 10 и 17 соответственно
     if [ "$list_height" -gt 10 ]; then
         list_height=10
         window_height=17
     fi
 
-    # Изменение цветов элементов списка
     export NEWT_COLORS='
         listbox=black,lightgray
         sellistbox=black,lightgray
@@ -78,14 +131,14 @@ select_partitions_dialog() {
         checkbox=black,lightgray
         actcheckbox=lightgray,black
     '
+
     local selections
     selections=$(whiptail --title "Выбор разделов" \
         --checklist "Выберите разделы (Пробел - выбор, Enter - ОК):" \
-        $window_height 60 $list_height \
+        $window_height 65 $list_height \
         --separate-output \
-        "$@" 3>&1 1>&2 2>&3 </dev/tty)
+        "$@" 3>&1 1>&2 2>&3)
 
-    # Возврат списка выбранных разделов, если нажата <OK>
     if [ $? -eq 0 ] && [ -n "$selections" ]; then
         echo "$selections"
         return 0
@@ -93,6 +146,12 @@ select_partitions_dialog() {
         return 1
     fi
 }
+
+# DISK=$(select_disk_dialog)
+# if [ -n $DISK ]; then
+#   select_partitions_dialog $DISK
+# fi
+# exit 0
 
 backup_gpt() {
     DISK=$1

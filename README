@@ -1,49 +1,17 @@
 # Программа для резервирования/восстановления СЗИ НСД
 
-В каталоге src старая версия с использованием qcow2 образов для хранения резервных копий и восстановления с помощью qemu-img. Это требовало установки большого числа зависимостей. В новой версии все необходимые зависимости скопированы заранее, смена корня не применяется, что упрощает код.
-
-NB! Проверялось в режиме восстановления Astra Linux SE 1.7. Замечено, что в Debian 13.5 были ошибки, детально не разбирался.
-
 Диску с резервными копиями присваивают метку BACKUP командой `e2label /dev/sdXN BACKUP`, чтобы потом проще монтировать по метке
 ```bash
 mount /dev/disk/by-label/BACKUP /mnt
 /mnt/backuper.sh
 ```
 
-# Программа pv
-Программа `pv` это просмотрщик пайпов (pipeviewer), который показывает прогресс выполнение той или иной команды по конвейеру и предоставляя информацию (прошедшее время, процент завершения (с индикатором выполнения), текущую пропускную способность, общий объем данных и ETA) 
-```
-pv $PARTITION | zstd -T0 > $IMAGE
-```
+## Создание самораспаковывающегося архива
 
-# Подготовка среды на подключаемом диске
-```
-# Монтирование диска восстановления
-sudo mount /dev/disk/by-label/BACKUP /mnt
+В Linux можно использовать специальную функцию компилятора objcopy, которая превращает любой файл, например, архив с вашим скриптом, в объектный бинарный файл (.o), а затем мы слинковать его с кодом на C.
+В итоге получится настоящий бинарный файл (ELF), внутри которого намертво зашит сжатый архив. При запуске программа распакует его в оперативную память или /tmp, выполнит скрипт, передав ему $CURRENT_PWD, и корректно завершится.
 
-# Создание необходимой структуры каталогов
-mkdir -p /mnt/bin /mnt/lib/x86_64-linux-gnu /mnt/lib64
-
-# Копирование бинарника busybox и создание ссылки на оболочку sh
-cp /usr/bin/busybox /mnt/bin/busybox
-ln -sf /bin/busybox /mnt/bin/sh
-
-# Копирование загрузчика (интерпретатора)
-cp /lib64/ld-linux-x86-64.so.2 /mnt/lib64/
-
-# Копирование зависимостей busybox
-cp /lib/x86_64-linux-gnu/libresolv.so.2 /mnt/lib/x86_64-linux-gnu/
-cp /lib/x86_64-linux-gnu/libc.so.6 /mnt/lib/x86_64-linux-gnu/
-
-# Вход в chroot среду
-sudo chroot /mnt /bin/sh
-
-# Содание симлинков на встроенные утилиты BusyBox (выполнять внутри)
-/bin/busybox --install -s /bin
-
-```
-
-# Функция поиска на дисках EFI System partition и добавления в NVRAM записи
+## Функция поиска на дисках EFI System partition и добавления в NVRAM записи
 ```
 # Функция ищет на дисках EFI System partition и добавляет в NVRAM запись,
 # в backuper.sh запись добавляется при восстановлении EFI System partition
@@ -76,114 +44,4 @@ add_nvram_entry() {
     echo "Boot entry already exists in NVRAM, skipped"
   fi
 }
-```
-
-# Создание самораспаковывающегося архива
-
-В Linux мы можем использовать специальную функцию компилятора objcopy, которая превращает любой файл (в нашем случае архив с вашим скриптом) в объектный бинарный файл (.o), а затем мы просто линкуем его с кодом на C.
-В итоге получится настоящий бинарный файл (ELF), внутри которого намертво зашит сжатый архив. При запуске программа распакует его в оперативную память или /tmp, выполнит скрипт, передав ему $CURRENT_PWD, и корректно завершится.
-
-# Обновленные варианты диалогов
-
-```bash
-#!/bin/sh
-
-# Вспомогательная функция для форматирования емкости дисков и разделов
-
-format_size() {
-    size_sectors=$1
-    size_gb=$(( size_sectors / 2097152 ))
-    
-    if [ $size_gb -ge 1024 ]; then
-        size_tb=$(( size_gb / 1024 ))
-        remainder=$(( size_gb % 1024 ))
-        decimal=$(( remainder * 10 / 1024 ))
-        echo "${size_tb}.${decimal}TB"
-    else
-        echo "${size_gb}GB"
-    fi
-}
-
-# Диалог выбора накопителя
-get_drive() {
-    set --
-    
-    for dev_path in /sys/block/*; do
-        dev=${dev_path##*/}
-        
-        case $dev in
-            sd*|nvme*|mmcblk*|hd*|vd*) ;;
-            *) continue ;;
-        esac
-        
-        size_str="?"
-        if [ -f "$dev_path/size" ]; then
-            size_sectors=$(cat "$dev_path/size")
-            [ -n "$size_sectors" ] && size_str=$(format_size "$size_sectors")
-        fi
-        
-        model=$(cat "$dev_path/device/model" 2>/dev/null | tr -d ' ')
-        [ -z "$model" ] && model="Unknown"
-        
-        set -- "$@" "$dev" "$model $size_str"
-    done
-    
-    [ $# -eq 0 ] && return 1
-    
-    SELECTED_DRIVE=$(whiptail --title "Выбор накопителя" \
-        --menu "Выберите накопитель:" 20 70 10 \
-        "$@" 3>&1 1>&2 2>&3) || return 1
-    
-    return 0
-}
-
-# Диалог выбора разделов
-get_partitions() {
-    target_drive=$1
-    set --
-    
-    for part_path in /sys/block/$target_drive/$target_drive*; do
-        [ -d "$part_path" ] || continue
-        part_name=${part_path##*/}
-        
-        size_str="?"
-        if [ -f "$part_path/size" ]; then
-            size_sectors=$(cat "$part_path/size")
-            [ -n "$size_sectors" ] && size_str=$(format_size "$size_sectors")
-        fi
-        
-        fs_type="unknown"
-        if command -v blkid >/dev/null 2>&1; then
-            fs_type=$(blkid -o value -s TYPE "/dev/$part_name" 2>/dev/null)
-            [ -z "$fs_type" ] && fs_type="empty/unknown"
-        fi
-        
-        set -- "$@" "$part_name" "$fs_type $size_str" "OFF"
-    done
-    
-    [ $# -eq 0 ] && return 1
-    
-    SELECTED_PARTS_RAW=$(whiptail --title "Выбор разделов" \
-        --checklist "Выберите разделы на $target_drive:" 20 70 10 \
-        "$@" 3>&1 1>&2 2>&3) || return 1
-    
-    SELECTED_PARTS=$(echo "$SELECTED_PARTS_RAW" | tr -d '"')
-    return 0
-}
-
-# Пример использования
-if get_drive; then
-    echo "Выбран накопитель: $SELECTED_DRIVE"
-    
-    if get_partitions "$SELECTED_DRIVE"; then
-        echo "Выбраны разделы:"
-        for part in $SELECTED_PARTS; do
-            echo "  -> /dev/$part"
-        done
-    else
-        echo "Выбор разделов отменён."
-    fi
-else
-    echo "Выбор накопителя отменён."
-fi
 ```
