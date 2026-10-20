@@ -28,14 +28,7 @@ $(OBJ): $(ARCHIVE)
 # Упаковка во временную директорию
 $(ARCHIVE): $(SOURCE)
 	@echo "Упаковка скрипта и зависимостей в $(ARCHIVE)..."
-	tar -czf $(ARCHIVE) \
-		--exclude=$(TARGET) \
-		--exclude=.git \
-		--exclude=README \
-		--exclude=TODO \
-		--exclude=Makefile \
-		--exclude=main.c \
-		.
+	tar -czf archive.tar.gz */
 
 # Очистка проекта
 clean:

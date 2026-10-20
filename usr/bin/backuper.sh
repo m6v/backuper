@@ -2,7 +2,20 @@
 
 BASE_DIR="$(cd $(dirname $0) && pwd)"
 export PATH="$BASE_DIR:$PATH"
-export LD_LIBRARY_PATH="$BASE_DIR/lib:${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+
+# Определение текущего каталога по реальному пути, игнорируя симлинки (флаг -P)
+BASE_DIR="$(cd -P -- "$(dirname -- "$0")" && pwd -P)"
+export PATH="$BASE_DIR:$PATH"
+
+# Вычисление абсолютных путей к библиотекам относительно каталога скрипта
+LIB_DIR="$BASE_DIR/../lib"
+GLIBC_DIR="$BASE_DIR/../lib/x86_64-linux-gnu"
+
+if [ -z "$LD_LIBRARY_PATH" ]; then
+    export LD_LIBRARY_PATH="$LIB_DIR:$GLIBC_DIR"
+else
+    export LD_LIBRARY_PATH="$LIB_DIR:$GLIBC_DIR:$LD_LIBRARY_PATH"
+fi
 
 DEBUG=""
 # Обертка для пропуска команд в режиме отладки
@@ -375,7 +388,7 @@ while true; do
 done
 
 # Каталог для хранения образов хоста
-STORAGE=$BASE_DIR/$HOSTNAME
+STORAGE="../../$BASE_DIR/$HOSTNAME"
 
 while true; do
     menu=$(whiptail --title "Главное меню" --menu "Выбор действия для $HOSTNAME:" 0 60 0 \

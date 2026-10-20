@@ -17,7 +17,7 @@ mkfs.ext4 -L "BACKUP" /dev/sda1
 mount /dev/disk/by-label/BACKUP /mnt
 
 # Создание необходимой структуры каталогов
-mkdir -p /mnt/bin /mnt/lib/x86_64-linux-gnu /mnt/lib64
+mkdir -p /mnt/bin /mnt/lib/x86_64-linux-gnu /mnt/lib64 /mnt/dev /mnt/proc /mnt/sys
 
 # Копирование бинарника busybox и создание ссылки на оболочку sh
 cp /usr/bin/busybox /mnt/bin/busybox
