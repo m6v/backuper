@@ -10,10 +10,6 @@ GLIBC_DIR="$(dirname $BASE_DIR)/lib/x86_64-linux-gnu"
 
 export LD_LIBRARY_PATH="$LIB_DIR:$GLIBC_DIR${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 
-echo PATH: $PATH
-echo LD_LIBRARY_PATH: $LD_LIBRARY_PATH
-exit 0
-
 DEBUG=""
 # Обертка для пропуска команд в режиме отладки
 run() {

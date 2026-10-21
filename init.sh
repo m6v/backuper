@@ -13,11 +13,12 @@ init_recovery_env() {
     chmod 1777 "$target_dir/tmp"
 
     # Создание вторичной иерархии внутри /usr
-    mkdir -p "$target_dir/usr"/{bin,sbin,lib,lib/x86_64-linux-gnu}
+    mkdir -p "$target_dir/usr"/{bin,sbin,lib,lib/x86_64-linux-gnu,lib64}
 
     ln -sfn usr/bin  "$target_dir/bin"
     ln -sfn usr/sbin "$target_dir/sbin"
     ln -sfn usr/lib  "$target_dir/lib"
+    ln -sfn usr/lib64 "$target_dir/lib64"
 }
 
 # Копирование исполняемого файла и его зависимостей
@@ -55,8 +56,8 @@ copy_bin_with_libs() {
         fi
     done
 
-    # Обрабатываем динамический загрузчик (интерпретатор ELF-файлов) через readelf
-    interpreter=$(readelf -l "$binary" 2>/dev/null | grep 'program interpreter' | tr -d '[]' | awk '{print $NF}')
+    # Копирование динамического загрузчика (интерпретатора ELF-файлов)
+    interpreter=$(readelf -l "$binary" | grep -e "program interpreter" -e "интерпретатор программы" | tr -d '[]' | awk '{print $NF}')
     if [ -f "$interpreter" ]; then
         echo "Копирование $interpreter..."
         cp --parents -p "$interpreter" "$target_dir/"
@@ -87,5 +88,16 @@ for cmd in "${@:1:$#-1}"; do
         echo "Ошибка при поиске и/или копировании компонентов для '$cmd'"
     fi
 done
+
+busybox_path=$(find "$TARGET_DIR" -name busybox -print -quit)
+if [ -n $busybox_path ]; then
+    echo "Инициализация окружения BusyBox..."
+    # Создание относительных ссылок на busybox в одном каталоге с busybox
+    for cmd in $($busybox_path --list); do
+        ln -sf "busybox" "$(dirname $busybox_path)/$cmd"
+    done
+    echo "Копирование локалей..."
+    cp --parents -p -r /usr/lib/locale "$TARGET_DIR"
+fi
 
 echo "Развертывание среды восстановления завершено"
