@@ -16,6 +16,9 @@ mkfs.ext4 -L "BACKUP" /dev/sda1
 # Монтирование диска восстановления
 mount /dev/disk/by-label/BACKUP /mnt
 
+# Создание программной среды на диске восстановления
+init.sh usr/bin/backuper.sh busybox efibootmgr qemu-img whiptail /mnt
+
 # Создание необходимой структуры каталогов
 mkdir -p /mnt/bin /mnt/lib/x86_64-linux-gnu /mnt/lib64 /mnt/dev /mnt/proc /mnt/sys
 

@@ -7,10 +7,17 @@ init_recovery_env() {
     echo "Инициализация среды восстановления в $target_dir..."
 
     # Создание каталогов для виртуальных файловых систем
-    mkdir -p "$target_dir"/{dev,proc,sys}
+    mkdir -p "$target_dir"/{dev,etc,proc,run,sys,tmp,usr}
 
     # Установка правильных прав для /tmp
-    # chmod 1777 "$target_dir/tmp"
+    chmod 1777 "$target_dir/tmp"
+
+    # Создание вторичной иерархии внутри /usr
+    mkdir -p "$target_dir/usr"/{bin,sbin,lib,lib/x86_64-linux-gnu}
+
+    ln -sfn usr/bin  "$target_dir/bin"
+    ln -sfn usr/sbin "$target_dir/sbin"
+    ln -sfn usr/lib  "$target_dir/lib"
 }
 
 # Копирование исполняемого файла и его зависимостей
@@ -40,7 +47,7 @@ copy_bin_with_libs() {
     echo "Копирование $binary..."
     cp --parents -p "$binary" "$target_dir/"
 
-    # Извлечение путей к библиотекам и копирование библиотек
+    # Извлечение путей к библиотекам и копирование библиотек с сохранением прав доступа (флаг -p)
     ldd "$binary" | awk '/\// {print $3}' | while read -r lib; do
         if [ -f "$lib" ]; then
             echo "Копирование $lib..."
@@ -49,7 +56,7 @@ copy_bin_with_libs() {
     done
 
     # Обрабатываем динамический загрузчик (интерпретатор ELF-файлов) через readelf
-    interpreter=$(readelf -l "$binary" | grep 'program interpreter' | tr -d '[]' | awk '{print $NF}')
+    interpreter=$(readelf -l "$binary" 2>/dev/null | grep 'program interpreter' | tr -d '[]' | awk '{print $NF}')
     if [ -f "$interpreter" ]; then
         echo "Копирование $interpreter..."
         cp --parents -p "$interpreter" "$target_dir/"
@@ -75,7 +82,7 @@ init_recovery_env "$TARGET_DIR"
 for cmd in "${@:1:$#-1}"; do
     copy_bin_with_libs "$cmd" "$TARGET_DIR"
     if [ $? -eq 0 ]; then
-        echo "Компоненты для '$cmd' скопированы"
+        echo "Компоненты $cmd скопированы"
     else
         echo "Ошибка при поиске и/или копировании компонентов для '$cmd'"
     fi
