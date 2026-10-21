@@ -1,8 +1,11 @@
 #!/bin/sh
 
-# Определение текущего каталога по реальному пути, игнорируя симлинки (флаг -P)
-BASE_DIR="$(cd -P -- "$(dirname -- "$0")" && pwd -P)"
+# Определение текущего каталога по реальному пути скрипта
+BASE_DIR="$(dirname "$(readlink -f "$0")")"
 export PATH="$BASE_DIR:$PATH"
+
+# Определение точки монтирования устройства на котором находится скрипт
+MOUNT_POINT=$(df -P $BASE_DIR | tail -n 1 | grep -o "[^ ]*$")
 
 # Вычисление абсолютных путей к библиотекам относительно каталога скрипта
 LIB_DIR="$(dirname $BASE_DIR)/lib"
@@ -381,7 +384,7 @@ while true; do
 done
 
 # Каталог для хранения образов хоста
-STORAGE="../../$BASE_DIR/$HOSTNAME"
+STORAGE="$MOUNT_POINT/$HOSTNAME"
 
 while true; do
     menu=$(whiptail --title "Главное меню" --menu "Выбор действия для $HOSTNAME:" 0 60 0 \
