@@ -14,7 +14,7 @@ mkfs.ext4 -L "BACKUP" /dev/sda1
 mount /dev/disk/by-label/BACKUP /mnt
 
 # Создание программной среды на диске восстановления
-init.sh usr/bin/backuper.sh busybox efibootmgr qemu-img whiptail /mnt
+init.sh usr/bin/backuper.sh blkid busybox efibootmgr qemu-img sfdisk whiptail /mnt
 ```
 
 ## Подготовка в ручном режиме

@@ -32,7 +32,7 @@ copy_bin_with_libs() {
     if [[ "$input" == /* ]]; then
         binary="$input"
     else
-        binary=$(which "$input" 2>/dev/null)
+        binary=$(PATH="$PATH:/usr/sbin:/sbin" which "$input" 2>/dev/null)
         if [ -z "$binary" ]; then
             binary=$(type -p "$input" 2>/dev/null)
         fi
@@ -89,7 +89,7 @@ for cmd in "${@:1:$#-1}"; do
     fi
 done
 
-busybox_path=$(find "$TARGET_DIR" -name busybox -print -quit)
+busybox_path=$(find "$TARGET_DIR" -name busybox -print -quit 2>/dev/null)
 if [ -n $busybox_path ]; then
     echo "Инициализация окружения BusyBox..."
     # Создание относительных ссылок на busybox в одном каталоге с busybox
