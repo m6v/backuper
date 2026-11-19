@@ -90,7 +90,7 @@ for cmd in "${@:1:$#-1}"; do
 done
 
 busybox_path=$(find "$TARGET_DIR" -name busybox -print -quit 2>/dev/null)
-if [ -n $busybox_path ]; then
+if [ -n "$busybox_path" ]; then
     echo "Инициализация окружения BusyBox..."
     # Создание относительных ссылок на busybox в одном каталоге с busybox
     for cmd in $($busybox_path --list); do
