@@ -200,13 +200,13 @@ restore_gpt() {
         echo "GPT dump $IMAGE not found"
         return 2
     fi
-    
+
     whiptail --title "Внимание" --yesno "Все данные диске будут уничтожены! Продолжить?" 8 60
     if [ $? -ne 0 ]; then
         echo "Operation canceled by user"
         return 1
     fi
-    
+
     # Восстановление GPT
     if run 'sfdisk $DISK < $IMAGE'; then
         # Синхронизация геометрии диска с ядром Linux 
@@ -229,7 +229,8 @@ backup_part() {
     fi
 
     run 'mkdir -p $STORAGE'
-    IMAGE=$STORAGE/$(basename $PARTITION).qcow2
+    # IMAGE=$STORAGE/$(basename $PARTITION).qcow2
+    IMAGE=$STORAGE/$(basename $PARTITION).fsa
 
     part_info=$(blkid | grep $PARTITION)
     part_type=$(echo "$part_info" | sed 's/.*TYPE="\([^"]*\).*/\1/')
@@ -257,7 +258,8 @@ backup_part() {
             run 'udevadm settle'
 
             echo "Backuping $PARTITION..."
-            run 'qemu-img convert -p -W -c -o compression_type=zstd -O qcow2 $PARTITION $IMAGE'
+            # run 'qemu-img convert -p -W -c -o compression_type=zstd -O qcow2 $PARTITION $IMAGE'
+            run 'fsarchiver savefs -Z 10 -j 4 $IMAGE $PARTITION'
             ;;
     esac
     if [ -f $IMAGE ]; then
@@ -282,7 +284,8 @@ restore_part() {
         return 0
     fi
 
-    IMAGE=$STORAGE/$(basename $PARTITION).qcow2
+    # IMAGE=$STORAGE/$(basename $PARTITION).qcow2
+    IMAGE=$STORAGE/$(basename $PARTITION).fsa
     if [ ! -f $IMAGE ]; then
         echo "Image $IMAGE is not found"
         return 2
@@ -303,7 +306,8 @@ restore_part() {
         parm="-S 0"
     fi
     echo "Restoring partition $PARTITION..."
-    run 'qemu-img convert -p -O raw $IMAGE $PARTITION'
+    # run 'qemu-img convert -p -O raw $IMAGE $PARTITION'
+    run 'fsarchiver restfs $IMAGE dest=$PARTITION'
 
     # Добавление записи в NVRAM, если восстанавливаемый раздел это ESP
     PARTITION_INFO=$(sfdisk -d $DISK | grep $PARTITION.*C12A7328)
