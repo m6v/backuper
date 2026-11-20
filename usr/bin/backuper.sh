@@ -230,7 +230,9 @@ backup_part() {
 
     run 'mkdir -p $STORAGE'
 
-    IMAGE=$STORAGE/$(basename $PARTITION).img
+    # IMAGE=$STORAGE/$(basename $PARTITION).qcow2
+    # fsachiver automaticaly add fsa extention to image
+    IMAGE=$STORAGE/$(basename $PARTITION)
 
     part_info=$(blkid | grep $PARTITION)
     part_type=$(echo "$part_info" | sed 's/.*TYPE="\([^"]*\).*/\1/')
@@ -265,12 +267,10 @@ backup_part() {
             # Disable line wraping and cursor visibility
             echo -ne "\033[?7l\033[?25l"
             # Use all cores of CPU while backuping partition and overriding image if exists (-o)
-            fsarchiver savefs -v -o -Z 10 -j $(grep -c '^processor' /proc/cpuinfo) $IMAGE $PARTITION 2>&1 | tr '\r' '\n' | while IFS= read -r line; do
-                case "$line" in
-                    # Print $line, clear rest of the line and returns cursor to start of line
-                    *\[0*) echo -ne "\r\033[K$line" ;;
-                esac
-            done;
+            fsarchiver -v -o -Z 10 -j $(grep -c '^processor' /proc/cpuinfo) savefs "$IMAGE" "$PARTITION" 2>&1 | while IFS= read -r line; do
+                printf "\r\033[K%s" "$line"
+            done
+            echo ""
             # Restore line wraping and cursor visibility
             echo -e "\033[?7h\033[?25h"
             ;;
@@ -299,7 +299,8 @@ restore_part() {
         return 0
     fi
 
-    IMAGE=$STORAGE/$(basename $PARTITION).img
+    # IMAGE=$STORAGE/$(basename $PARTITION).qcow2
+    IMAGE=$STORAGE/$(basename $PARTITION).fsa
     if [ ! -f $IMAGE ]; then
         echo "Image $IMAGE is not found"
         return 2
@@ -321,8 +322,19 @@ restore_part() {
     fi
     echo "Restoring partition $PARTITION..."
     # run 'qemu-img convert -p -O raw $IMAGE $PARTITION'
+
+    # Restore line wraping and cursor visibility if interapted
+    trap 'echo -e "\033[?7h\033[?25h"; exit' INT TERM
+    # Disable line wraping and cursor visibility
+    echo -ne "\033[?7l\033[?25l"
     # Use all cores of CPU while restoring partition
-    run 'fsarchiver -j $(grep -c '^processor' /proc/cpuinfo) restfs $IMAGE id=0,dest=$PARTITION'
+    fsarchiver -v -j $(grep -c '^processor' /proc/cpuinfo) restfs $IMAGE id=0,dest=$PARTITION 2>&1 | while IFS= read -r line; do
+        printf "\r\033[K%s" "$line"
+    done
+    echo ""
+    # Restore line wraping and cursor visibility
+    echo -e "\033[?7h\033[?25h"
+
 
     # Добавление записи в NVRAM, если восстанавливаемый раздел это ESP
     PARTITION_INFO=$(sfdisk -d $DISK | grep $PARTITION.*C12A7328)
