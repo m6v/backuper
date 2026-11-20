@@ -54,6 +54,10 @@ mkdir -p /sys/firmware/efi/efivars
 mkdir -t efivarfs efivarfs /sys/firmware/efi/efivars
 ```
 
+## Сборка fsarchiver версии
+
+init.sh usr/bin/backuper.sh /usr/bin/fsarchiver efibootmgr mkfs.vfat whiptail /mnt
+
 ## Создание самораспаковывающегося архива
 
 В Linux можно использовать специальную функцию компилятора objcopy, которая превращает любой файл, например, архив с вашим скриптом, в объектный бинарный файл (.o), а затем мы слинковать его с кодом на C.
