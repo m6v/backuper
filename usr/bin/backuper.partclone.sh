@@ -230,9 +230,7 @@ backup_part() {
 
     run 'mkdir -p $STORAGE'
 
-    # IMAGE=$STORAGE/$(basename $PARTITION).qcow2
-    # fsachiver automaticaly add fsa extention to image
-    IMAGE=$STORAGE/$(basename $PARTITION)
+    IMAGE=$STORAGE/$(basename $PARTITION).img
 
     part_info=$(blkid | grep $PARTITION)
     part_type=$(echo "$part_info" | sed 's/.*TYPE="\([^"]*\).*/\1/')
@@ -241,45 +239,16 @@ backup_part() {
         swap)
             echo "Skipped swap $PARTITION"
             ;;
+        vfat)
+            partclone.fat -c -N -s $PARTITION | zstd -T0 -q -3 -o $IMAGE 2>/dev/null
+            ;;
+        ext*)
+            partclone.extfs -c -N -s $PARTITION | zstd -T0 -q -3 -o $IMAGE 2>/dev/null
+            ;;
         *)
-            run 'mkdir -p /tmp/trim'
-            run 'mount $PARTITION /tmp/trim'
-
-            # Проверка поддержки диском триммирования
-            if [ "$(cat /sys/block/$(basename $DISK)/queue/discard_max_bytes 2>/dev/null)" -gt 0 ]; then
-                echo "Trimming free space on $PARTITION..."
-                run 'fstrim -v /tmp/trim 2>/dev/null || true'
-            else
-                # NB! Для vfat при превышении размера файла 4ГБ завершится с ошибкой "File too large"
-                echo "Writing zeroes to clear free space on $PARTITION..."
-                run 'dd if=/dev/zero of=/tmp/trim/zero bs=4M status=progress 2>/dev/null || true'
-                run 'rm /tmp/trim/zero'
-            fi
-            run 'umount /tmp/trim'
-            run 'sync'
-            run 'udevadm settle'
-
-            echo "Backuping $PARTITION..."
-            # run 'qemu-img convert -p -W -c -o compression_type=zstd -O qcow2 $PARTITION $IMAGE'
-
-            # Restore line wraping and cursor visibility if interapted
-            trap 'echo -e "\033[?7h\033[?25h"; exit' INT TERM
-            # Disable line wraping and cursor visibility
-            echo -ne "\033[?7l\033[?25l"
-            # Use all cores of CPU while backuping partition and overriding image if exists (-o)
-            fsarchiver -v -o -Z 10 -j $(grep -c '^processor' /proc/cpuinfo) savefs "$IMAGE" "$PARTITION" 2>&1 | while IFS= read -r line; do
-                printf "\r\033[K%s" "$line"
-            done
-            echo ""
-            # Restore line wraping and cursor visibility
-            echo -e "\033[?7h\033[?25h"
+            partclone.dd -c -N -s $PARTITION | zstd -T0 -q -3 -o $IMAGE 2>/dev/null
             ;;
     esac
-    : "
-    if [ -f $IMAGE ]; then
-        run 'qemu-img check $IMAGE'
-    fi
-    "
 }
 
 restore_part() {
@@ -299,8 +268,7 @@ restore_part() {
         return 0
     fi
 
-    # IMAGE=$STORAGE/$(basename $PARTITION).qcow2
-    IMAGE=$STORAGE/$(basename $PARTITION).fsa
+    IMAGE=$STORAGE/$(basename $PARTITION).img
     if [ ! -f $IMAGE ]; then
         echo "Image $IMAGE is not found"
         return 2
@@ -321,20 +289,7 @@ restore_part() {
         parm="-S 0"
     fi
     echo "Restoring partition $PARTITION..."
-    # run 'qemu-img convert -p -O raw $IMAGE $PARTITION'
-
-    # Restore line wraping and cursor visibility if interapted
-    trap 'echo -e "\033[?7h\033[?25h"; exit' INT TERM
-    # Disable line wraping and cursor visibility
-    echo -ne "\033[?7l\033[?25l"
-    # Use all cores of CPU while restoring partition
-    fsarchiver -v -j $(grep -c '^processor' /proc/cpuinfo) restfs $IMAGE id=0,dest=$PARTITION 2>&1 | while IFS= read -r line; do
-        printf "\r\033[K%s" "$line"
-    done
-    echo ""
-    # Restore line wraping and cursor visibility
-    echo -e "\033[?7h\033[?25h"
-
+    zstd -dc -T0 -q $IMAGE 2>/dev/null | partclone.restore -N -s - -o $PARTITION
 
     # Добавление записи в NVRAM, если восстанавливаемый раздел это ESP
     PARTITION_INFO=$(sfdisk -d $DISK | grep $PARTITION.*C12A7328)

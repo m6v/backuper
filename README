@@ -58,6 +58,20 @@ mkdir -t efivarfs efivarfs /sys/firmware/efi/efivars
 
 init.sh usr/bin/backuper.sh /usr/bin/fsarchiver efibootmgr mkfs.vfat whiptail /mnt
 
+## Использование partclone
+
+Запуск
+```
+partclone.type -c -N -s $PARTITION | zstd -3 -o $IMAGE 2>/dev/null
+```
+
+Сборка
+```
+init.sh usr/bin/backuper.sh usr/bin/partclone.fat usr/bin/partclone.extfs usr/bin/partclone.dd efibootmgr whiptail zstd /mnt
+# Какая-то особенность partclone, требует libgcc_s.so.1, хотя ldd в зависимостях не выводит
+cp /usr/lib/x86_64-linux-gnu/libgcc_s.so.1 /mnt/usr/lib/x86_64-linux-gnu
+```
+
 ## Создание самораспаковывающегося архива
 
 В Linux можно использовать специальную функцию компилятора objcopy, которая превращает любой файл, например, архив с вашим скриптом, в объектный бинарный файл (.o), а затем мы слинковать его с кодом на C.
