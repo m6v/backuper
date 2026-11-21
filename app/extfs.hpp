@@ -7,12 +7,17 @@
 #include <stdexcept>
 #include <chrono>
 #include <cstdio>
+#include <getopt.h>
 #include <unistd.h>
 
 #pragma pack(push, 1)
+
+inline constexpr std::array<char, 8> IMAGE_MAGIC = {'E', 'X', 'T', '4', 'P', 'A', 'R', 'T'};
+inline constexpr uint32_t IMAGE_VERSION = 3;
+
 struct ImageHeader {
-    std::array<char, 8> magic;  // "MAKSIMOV"
-    uint32_t version;           // 3
+    std::array<char, 8> magic;  // Магическая последовательность
+    uint32_t version;           // Версия программы
     uint32_t block_size;        // Размер блока ФС (обычно 4096)
     uint64_t total_blocks;      // Общее число блоков ФС
     uint64_t used_blocks;       // Число занятых блоков (для прогресс-бара)
@@ -63,43 +68,53 @@ private:
 };
 
 struct CliArgs {
-    std::string prog_name;
     std::string src;
     std::string dst;
     int progress_fd = -1;
 };
 
-// Разбирает позиционные аргументы (источник/приемник) и опцию --progress-fd
-inline CliArgs parse_cli_args(int argc, char* argv[], const std::string& usage_hint) {
+// Разбирает опции (--status-fd / -s <FD>, --help / -h) и два позиционных аргумента
+inline CliArgs parse_cli_args(int argc, char* argv[],
+                              const std::string& description,
+                              const std::string& usage_hint) {
+    std::string prog = (argc > 0) ? *argv : "tool";
+    std::string short_usage = "Usage: " + prog + " [--status-fd N] " + usage_hint;
+    std::string full_help =
+        prog + " - " + description + "\n\n" +
+        short_usage + "\n\n"
+        "Options:\n"
+        "  -s, --status-fd N   Write machine-readable progress (whiptail/dialog) to FD N\n"
+        "  -h, --help          Show this help message and exit\n";
+
+    static constexpr struct option long_opts[] = {
+        {"status-fd", required_argument, nullptr, 's'},
+        {"help",      no_argument,       nullptr, 'h'},
+        {nullptr, 0, nullptr, 0}
+    };
+
     CliArgs res;
-    res.prog_name = (argc > 0) ? *argv : "tool";
-    std::vector<std::string> pos;
-
-    for (int i = 1; i < argc; ++i) {
-        std::string arg = argv[i];
-        if (arg == "-h" || arg == "--help") {
-            throw std::runtime_error("Usage: " + res.prog_name + " " + usage_hint);
-        }
-        if (arg == "--progress-fd") {
-            if (i + 1 >= argc) {
-                throw std::runtime_error("Option --progress-fd requires a file descriptor number");
-            }
+    int opt;
+    while ((opt = ::getopt_long(argc, argv, "s:h", long_opts, nullptr)) != -1) {
+        if (opt == 's') {
             try {
-                res.progress_fd = std::stoi(argv[++i]);
+                res.progress_fd = std::stoi(optarg);
             } catch (...) {
-                throw std::runtime_error("Invalid file descriptor number for --progress-fd");
+                throw std::runtime_error("Invalid file descriptor number for --status-fd");
             }
+        } else if (opt == 'h') {
+            std::cout << full_help;
+            std::exit(0);
         } else {
-            pos.push_back(arg);
+            throw std::runtime_error(short_usage);
         }
     }
 
-    if (pos.size() != 2) {
-        throw std::runtime_error("Usage: " + res.prog_name + " " + usage_hint);
+    if (argc - optind != 2) {
+        throw std::runtime_error(short_usage);
     }
 
-    res.src = pos.at(0);
-    res.dst = pos.at(1);
+    res.src = *(argv + optind);
+    res.dst = *(argv + optind + 1);
     return res;
 }
 

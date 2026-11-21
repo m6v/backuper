@@ -1,34 +1,35 @@
 CXX      := g++
 CXXFLAGS := -std=c++17 -O2 -Wall -Wextra -Wpedantic
 
-LDFLAGS_BACKUP  := -lext2fs -lcom_err
-LDFLAGS_RESTORE := -lext2fs -lcom_err
+LDFLAGS        := -lext2fs -lcom_err
+LDFLAGS_STATIC := -static -lext2fs -lcom_err -lpthread
 
-TARGETS := pbackup prestore
+PREFIX  ?= /usr/local
+BINDIR  := $(DESTDIR)$(PREFIX)/bin
 
-.PHONY: build clean test
+TARGETS := backpart.extfs restpart.extfs
 
-# Цель по умолчанию
+.PHONY: build static install uninstall clean
+
 build: $(TARGETS)
 
-pbackup: pbackup.cpp format.hpp
-	$(CXX) $(CXXFLAGS) pbackup.cpp -o $@ $(LDFLAGS_BACKUP)
+backpart.extfs: backpart.extfs.cpp extfs.hpp
+	$(CXX) $(CXXFLAGS) backpart.extfs.cpp -o $@ $(LDFLAGS)
 
-prestore: prestore.cpp format.hpp
-	$(CXX) $(CXXFLAGS) prestore.cpp -o $@ $(LDFLAGS_RESTORE)
+restpart.extfs: restpart.extfs.cpp extfs.hpp
+	$(CXX) $(CXXFLAGS) restpart.extfs.cpp -o $@ $(LDFLAGS)
+
+static: backpart.extfs.cpp restpart.extfs.cpp extfs.hpp
+	$(CXX) $(CXXFLAGS) backpart.extfs.cpp -o backpart.extfs $(LDFLAGS_STATIC)
+	$(CXX) $(CXXFLAGS) restpart.extfs.cpp -o restpart.extfs $(LDFLAGS_STATIC)
+	strip $(TARGETS)
+
+install: build
+	install -d $(BINDIR)
+	install -m 755 $(TARGETS) $(BINDIR)/
+
+uninstall:
+	rm -f $(addprefix $(BINDIR)/,$(TARGETS))
 
 clean:
-	rm -f $(TARGETS) test_src.img test_dst.img test.img.zst
-
-test: build
-	@rm -f test_dst.img
-	@echo "Создание тестового образа ext4 (100 МБ)..."
-	dd if=/dev/zero of=test_src.img bs=1M count=100 status=none
-	mkfs.ext4 -F -q test_src.img
-	@echo "Клонирование через пайп в zstd..."
-	./pbackup test_src.img - | zstd -f -q -o test.img.zst
-	@echo "Восстановление в новый файл..."
-	zstd -dc test.img.zst | ./prestore - test_dst.img
-	@echo "Проверка целостности с помощью e2fsck..."
-	e2fsck -fn test_dst.img
-	@echo "Тест успешно пройден!"
+	rm -f $(TARGETS)

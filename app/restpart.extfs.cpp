@@ -9,7 +9,7 @@
 #include <sys/ioctl.h>
 #include <linux/fs.h>
 #include <ext2fs/ext2fs.h>
-#include "format.hpp"
+#include "extfs.hpp"
 
 // Читает count байт из файла или пайпа; возвращает false на чистом EOF
 bool read_exact(int fd, void* buf, size_t count) {
@@ -98,7 +98,8 @@ void restore_volume(const CliArgs& args) {
     if (!read_exact(in_fd.get(), &hdr, sizeof(hdr))) {
         throw std::runtime_error("Empty input stream");
     }
-    if (std::memcmp(hdr.magic.data(), "MAKSIMOV", hdr.magic.size()) != 0 || hdr.version != 3) {
+
+    if (hdr.magic != IMAGE_MAGIC || hdr.version != IMAGE_VERSION) {
         throw std::runtime_error("Invalid image format or unsupported version");
     }
 
@@ -188,7 +189,11 @@ void restore_volume(const CliArgs& args) {
 
 int main(int argc, char* argv[]) {
     try {
-        CliArgs args = parse_cli_args(argc, argv, "<input_file|-> <target_device> [--progress-fd N]");
+        CliArgs args = parse_cli_args(
+            argc, argv,
+            "Block-level image restore tool for ext2/ext3/ext4 filesystems",
+            "<input_file|-> <target_device>"
+        );
         restore_volume(args);
     } catch (const std::exception& e) {
         std::cerr << e.what() << "\n";

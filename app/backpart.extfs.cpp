@@ -7,7 +7,7 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <ext2fs/ext2fs.h>
-#include "format.hpp"
+#include "extfs.hpp"
 
 // Записывает count байт из буфера в файл или пайп
 void write_exact(int fd, const void* buf, size_t count) {
@@ -103,8 +103,8 @@ void backup_volume(const CliArgs& args) {
     }
 
     ImageHeader img_hdr{};
-    std::memcpy(img_hdr.magic.data(), "MAKSIMOV", img_hdr.magic.size());
-    img_hdr.version = 3;
+    img_hdr.magic = IMAGE_MAGIC;
+    img_hdr.version = IMAGE_VERSION;
     img_hdr.block_size = block_size;
     img_hdr.total_blocks = total_blocks;
     img_hdr.used_blocks = total_used_blocks;
@@ -181,7 +181,11 @@ void backup_volume(const CliArgs& args) {
 
 int main(int argc, char* argv[]) {
     try {
-        CliArgs args = parse_cli_args(argc, argv, "<source_device> <output_file|-> [--progress-fd N]");
+        CliArgs args = parse_cli_args(
+            argc, argv,
+            "Fast block-level backup tool for ext2/ext3/ext4 filesystems",
+            "<source_device> <output_file|->"
+        );
         backup_volume(args);
     } catch (const std::exception& e) {
         std::cerr << e.what() << "\n";
