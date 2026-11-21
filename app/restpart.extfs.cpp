@@ -11,7 +11,7 @@
 #include <ext2fs/ext2fs.h>
 #include "extfs.hpp"
 
-// Чтение count байт из файла или пайпа; возврат false на чистом EOF
+// Чтение count байт из файла (пайпа) или возврат false при EOF
 bool read_exact(int fd, void* buf, size_t count) {
     size_t total_read = 0;
     char* ptr = static_cast<char*>(buf);
@@ -51,18 +51,14 @@ void restore_volume(const CliArgs& args) {
     initialize_ext2_error_table();
 
     struct stat st{};
-    bool target_exists = (::stat(args.dst.c_str(), &st) == 0);
-    bool is_dev_path = (args.dst.rfind("/dev/", 0) == 0);
+    bool exists = (::stat(args.dst.c_str(), &st) == 0);
+    bool is_dev = (args.dst.rfind("/dev/", 0) == 0);
 
-    if (is_dev_path) {
-        if (!target_exists) {
-            throw std::runtime_error("Target device '" + args.dst + "' does not exist!");
-        }
-        if (!S_ISBLK(st.st_mode)) {
-            throw std::runtime_error("Target '" + args.dst + "' is in /dev/ but is NOT a block device!");
-        }
-    } else if (target_exists && !S_ISBLK(st.st_mode) && !S_ISREG(st.st_mode)) {
-        throw std::runtime_error("Target '" + args.dst + "' must be a block device or a regular file!");
+    if (is_dev && !exists) {
+        throw std::runtime_error("Target device '" + args.dst + "' does not exist!");
+    }
+    if (exists && !S_ISBLK(st.st_mode) && (is_dev || !S_ISREG(st.st_mode))) {
+        throw std::runtime_error("Target '" + args.dst + "' must be a block device" + (is_dev ? "" : " or regular file") + "!");
     }
 
     int mount_flags = 0;
@@ -88,7 +84,7 @@ void restore_volume(const CliArgs& args) {
         ::posix_fadvise(in_fd.get(), 0, 0, POSIX_FADV_SEQUENTIAL | POSIX_FADV_NOREUSE);
     }
 
-    int open_flags = O_WRONLY | (is_dev_path ? 0 : O_CREAT);
+    int open_flags = O_WRONLY | (is_dev ? 0 : O_CREAT);
     UniqueFd out_fd(::open(args.dst.c_str(), open_flags, 0644), true);
     if (!out_fd) {
         throw std::runtime_error("Cannot open target device '" + args.dst + "': " + std::string(strerror(errno)));

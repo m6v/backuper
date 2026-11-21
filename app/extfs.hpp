@@ -2,13 +2,15 @@
 #include <cstdint>
 #include <cstddef>
 #include <array>
-#include <vector>
 #include <string>
 #include <stdexcept>
 #include <chrono>
 #include <cstdio>
-#include <getopt.h>
+#include <iostream>
+#include <cstdlib>
 #include <unistd.h>
+#include <getopt.h>
+#include <zlib.h>
 
 #pragma pack(push, 1)
 
@@ -31,6 +33,13 @@ struct ChunkHeader {
     uint32_t data_crc32;        // CRC32 полезных данных чанка
 };
 #pragma pack(pop)
+
+// Вычисление контрольной суммы CRC32 (IEEE 802.3) с использованием zlib
+inline uint32_t compute_crc32(const void* data, size_t length, uint32_t initial = 0) {
+    return static_cast<uint32_t>(
+        ::crc32(initial, static_cast<const Bytef*>(data), static_cast<uInt>(length))
+    );
+}
 
 // RAII-обертка над системным файловым дескриптором
 class UniqueFd {
@@ -116,28 +125,6 @@ inline CliArgs parse_cli_args(int argc, char* argv[],
     res.src = *(argv + optind);
     res.dst = *(argv + optind + 1);
     return res;
-}
-
-// Вычисление контрольной суммы CRC32 (IEEE 802.3) с использованием таблицы, сгенерированной при компиляции
-inline uint32_t compute_crc32(const void* data, size_t length, uint32_t initial = 0) {
-    static constexpr auto table = []() {
-        std::array<uint32_t, 256> t{};
-        for (uint32_t i = 0; i < 256; ++i) {
-            uint32_t c = i;
-            for (int k = 0; k < 8; ++k) {
-                c = (c & 1) ? (0xEDB88320U ^ (c >> 1)) : (c >> 1);
-            }
-            t[i] = c;
-        }
-        return t;
-    }();
-
-    uint32_t crc = ~initial;
-    const auto* bytes = static_cast<const uint8_t*>(data);
-    for (size_t i = 0; i < length; ++i) {
-        crc = table[(crc ^ bytes[i]) & 0xFF] ^ (crc >> 8);
-    }
-    return ~crc;
 }
 
 // Управление выводом прогресса и скорости (МБ/с) в заданный FD (для whiptail/dialog)

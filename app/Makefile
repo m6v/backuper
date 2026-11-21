@@ -1,8 +1,8 @@
 CXX      := g++
 CXXFLAGS := -std=c++17 -O2 -Wall -Wextra -Wpedantic
 
-LDFLAGS        := -lext2fs -lcom_err
-LDFLAGS_STATIC := -static -lext2fs -lcom_err -lpthread
+LDFLAGS        := -lext2fs -lcom_err -lz
+LDFLAGS_STATIC := -static -lext2fs -lcom_err -lz -lpthread
 
 PREFIX  ?= /usr/local
 BINDIR  := $(DESTDIR)$(PREFIX)/bin
