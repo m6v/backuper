@@ -32,6 +32,11 @@ backpart.extfs --status-fd 3 /tmp/src.img - 2>/dev/null 3> >(whiptail --title "B
 zstd -dc -q backup.img.zst | restpart.extfs --status-fd 3 - /tmp/dst.img 2>/dev/null 3> >(whiptail --title "Restore" --gauge "Инициализация..." 9 65 0 > /dev/tty)
 ```
 
+Проверка целостности образа
+```
+zstd -dc -q backup.img.zst | restpart.extfs --verify -
+```
+
 ## Бэкап ESP
 
 Бэкап ESP с прогресс-баром

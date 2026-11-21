@@ -2,6 +2,7 @@
 #include <vector>
 #include <string>
 #include <stdexcept>
+#include <sys/file.h>
 #include <cstring>
 #include <algorithm>
 #include <fcntl.h>
@@ -65,6 +66,12 @@ void backup_volume(const CliArgs& args) {
     }
 
     Ext2Volume vol(args.src);
+    
+    UniqueFd lock_fd(::open(args.src.c_str(), O_RDONLY), true);
+    if (lock_fd && ::flock(lock_fd.get(), LOCK_SH | LOCK_NB) != 0) {
+        throw std::runtime_error("Source device '" + args.src + "' is locked by an exclusive operation!");
+    }
+    
     ext2_filsys fs = vol.handle();
 
     if (fs->super->s_feature_incompat & EXT3_FEATURE_INCOMPAT_RECOVER) {

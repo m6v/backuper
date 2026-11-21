@@ -112,36 +112,47 @@ struct CliArgs {
     std::string src;
     std::string dst;
     int progress_fd = -1;
+    bool verify_only = false;
 };
 
-// Разбор опций (--status-fd / -s <FD>, --help / -h) и двух позиционных аргументов src и dst
+// Разбор опций (--status-fd / -s <FD>, --verify / -v, --help / -h) и позиционных аргументов
 inline CliArgs parse_cli_args(int argc, char* argv[],
                               const std::string& description,
-                              const std::string& usage_hint) {
+                              const std::string& usage_hint,
+                              bool support_verify = false) {
     std::string prog = (argc > 0) ? *argv : "tool";
-    std::string short_usage = "Usage: " + prog + " [--status-fd N] " + usage_hint;
+    std::string opts_hint = support_verify ? "[--status-fd N] [--verify] " : "[--status-fd N] ";
+    std::string short_usage = "Usage: " + prog + " " + opts_hint + usage_hint;
+
     std::string full_help =
         prog + " - " + description + "\n\n" +
         short_usage + "\n\n"
         "Options:\n"
-        "  -s, --status-fd N   Write machine-readable progress (whiptail/dialog) to FD N\n"
-        "  -h, --help          Show this help message and exit\n";
+        "  -s, --status-fd N   Write machine-readable progress (whiptail/dialog) to FD N\n";
+    if (support_verify) {
+        full_help += "  -v, --verify        Verify image integrity (CRC32 & EOF) without writing to disk\n";
+    }
+    full_help += "  -h, --help          Show this help message and exit\n";
 
     static constexpr struct option long_opts[] = {
         {"status-fd", required_argument, nullptr, 's'},
+        {"verify",    no_argument,       nullptr, 'v'},
         {"help",      no_argument,       nullptr, 'h'},
         {nullptr, 0, nullptr, 0}
     };
 
     CliArgs res;
     int opt;
-    while ((opt = ::getopt_long(argc, argv, "s:h", long_opts, nullptr)) != -1) {
+    const char* short_opts = support_verify ? "s:vh" : "s:h";
+    while ((opt = ::getopt_long(argc, argv, short_opts, long_opts, nullptr)) != -1) {
         if (opt == 's') {
             try {
                 res.progress_fd = std::stoi(optarg);
             } catch (...) {
                 throw std::runtime_error("Invalid file descriptor number for --status-fd");
             }
+        } else if (opt == 'v' && support_verify) {
+            res.verify_only = true;
         } else if (opt == 'h') {
             std::cout << full_help;
             std::exit(0);
@@ -150,12 +161,15 @@ inline CliArgs parse_cli_args(int argc, char* argv[],
         }
     }
 
-    if (argc - optind != 2) {
+    int expected_pos = res.verify_only ? 1 : 2;
+    if (argc - optind != expected_pos) {
         throw std::runtime_error(short_usage);
     }
 
     res.src = *(argv + optind);
-    res.dst = *(argv + optind + 1);
+    if (!res.verify_only) {
+        res.dst = *(argv + optind + 1);
+    }
     return res;
 }
 
