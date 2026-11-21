@@ -1,6 +1,7 @@
 #pragma once
 #include <cstdint>
 #include <cstddef>
+#include <cstring>
 #include <array>
 #include <string>
 #include <stdexcept>
@@ -11,12 +12,12 @@
 #include <unistd.h>
 #include <getopt.h>
 #include <zlib.h>
-
-#pragma pack(push, 1)
+#include <ext2fs/ext2fs.h>
 
 inline constexpr std::array<char, 8> IMAGE_MAGIC = {'E', 'X', 'T', 'I', 'M', 'A', 'G', 'E'};
 inline constexpr uint32_t IMAGE_VERSION = 3;
 
+#pragma pack(push, 1)
 struct ImageHeader {
     std::array<char, 8> magic;  // Магическая последовательность
     uint32_t version;           // Версия программы
@@ -39,6 +40,37 @@ inline uint32_t compute_crc32(const void* data, size_t length, uint32_t initial 
     return static_cast<uint32_t>(
         ::crc32(initial, static_cast<const Bytef*>(data), static_cast<uInt>(length))
     );
+}
+
+// Гарантированное выполнение системного вызова ввода-вывода (read/write/pwrite) на всю длину count
+template <typename Func>
+inline bool io_exact(size_t count, Func&& op, bool allow_clean_eof = false) {
+    size_t done = 0;
+    while (done < count) {
+        ssize_t res = op(done, count - done);
+        if (res == 0) {
+            if (allow_clean_eof && done == 0) return false;
+            throw std::runtime_error("Unexpected EOF in stream");
+        }
+        if (res < 0) {
+            if (errno == EINTR) continue;
+            throw std::runtime_error("I/O error: " + std::string(strerror(errno)));
+        }
+        done += res;
+    }
+    return true;
+}
+
+// Проверка, что устройство не смонтировано (или смонтировано только в ro, если разрешено)
+inline void ensure_not_mounted(const std::string& path, bool allow_readonly = false) {
+    initialize_ext2_error_table();
+    int flags = 0;
+    if (errcode_t err = ext2fs_check_if_mounted(path.c_str(), &flags)) {
+        throw std::runtime_error("Mount check error: " + std::string(error_message(err)));
+    }
+    if ((flags & EXT2_MF_MOUNTED) && !(allow_readonly && (flags & EXT2_MF_READONLY))) {
+        throw std::runtime_error("Device '" + path + "' is mounted! Unmount it first.");
+    }
 }
 
 // RAII-обертка над системным файловым дескриптором
@@ -138,28 +170,17 @@ public:
           start_time_(std::chrono::steady_clock::now()),
           last_update_(start_time_) {
         if (fd_) {
-            write_status(0, 0, 0.0);
-            last_pct_ = 0;
+            write_status(0, start_time_);
         }
     }
 
-    // Периодический (не чаще раза в 250 мс) рассчет процента и средней скорости
+    // Периодический (не чаще раза в 250 мс) расчет процента и средней скорости
     void update(uint64_t current_blocks) {
         if (!fd_ || total_ == 0) return;
 
-        int pct = static_cast<int>((current_blocks * 100) / total_);
-        if (pct > 100) pct = 100;
-
         auto now = std::chrono::steady_clock::now();
-        auto elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(now - last_update_).count();
-
-        if (elapsed_ms >= 250) {
-            double total_sec = std::chrono::duration<double>(now - start_time_).count();
-            double copied_mb = (static_cast<double>(current_blocks) * block_size_) / (1024.0 * 1024.0);
-            double speed_mbps = (total_sec > 0.001) ? (copied_mb / total_sec) : 0.0;
-
-            write_status(pct, current_blocks, speed_mbps);
-            last_pct_ = pct;
+        if (std::chrono::duration_cast<std::chrono::milliseconds>(now - last_update_).count() >= 250) {
+            write_status(current_blocks, now);
             last_update_ = now;
         }
     }
@@ -167,20 +188,21 @@ public:
     // Отправка финальных 100% и закрытие FD, чтобы внешний диалог получил EOF и закрылся
     void finish() {
         if (fd_) {
-            auto now = std::chrono::steady_clock::now();
-            double total_sec = std::chrono::duration<double>(now - start_time_).count();
-            double copied_mb = (static_cast<double>(total_) * block_size_) / (1024.0 * 1024.0);
-            double speed_mbps = (total_sec > 0.001) ? (copied_mb / total_sec) : 0.0;
-
-            write_status(100, total_, speed_mbps);
-            last_pct_ = 100;
+            write_status(total_, std::chrono::steady_clock::now());
             fd_.reset();
         }
     }
 
 private:
-    // Форматирование и запись статуса в формате XXX для whiptail/dialog
-    void write_status(int pct, uint64_t current_blocks, double speed_mbps) {
+    // Расчет статистики и запись статуса в формате XXX для whiptail/dialog
+    void write_status(uint64_t current_blocks, std::chrono::steady_clock::time_point now) {
+        int pct = (total_ > 0) ? static_cast<int>((current_blocks * 100) / total_) : 100;
+        if (pct > 100) pct = 100;
+
+        double total_sec = std::chrono::duration<double>(now - start_time_).count();
+        double copied_mb_exact = (static_cast<double>(current_blocks) * block_size_) / (1024.0 * 1024.0);
+        double speed_mbps = (total_sec > 0.001) ? (copied_mb_exact / total_sec) : 0.0;
+
         uint64_t copied_mb = (current_blocks * block_size_) / (1024 * 1024);
         uint64_t total_mb  = (total_ * block_size_) / (1024 * 1024);
 
@@ -202,7 +224,6 @@ private:
     UniqueFd fd_;
     uint64_t total_ = 0;
     uint32_t block_size_ = 4096;
-    int last_pct_ = -1;
     std::chrono::steady_clock::time_point start_time_;
     std::chrono::steady_clock::time_point last_update_;
 };

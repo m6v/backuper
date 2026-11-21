@@ -11,16 +11,10 @@
 
 // Записывает count байт из буфера в файл или пайп
 void write_exact(int fd, const void* buf, size_t count) {
-    size_t total_written = 0;
     const char* ptr = static_cast<const char*>(buf);
-    while (total_written < count) {
-        ssize_t res = ::write(fd, ptr + total_written, count - total_written);
-        if (res <= 0) {
-            if (res < 0 && errno == EINTR) continue;
-            throw std::runtime_error("Write error: " + std::string(strerror(errno)));
-        }
-        total_written += res;
-    }
+    io_exact(count, [&](size_t off, size_t rem) {
+        return ::write(fd, ptr + off, rem);
+    });
 }
 
 // RAII-обертка над дескриптором файловой системы libext2fs
@@ -28,20 +22,9 @@ class Ext2Volume {
 public:
     // Проверка, что ФС не смонтирована в rw, открытие её и загрузка карты занятых блоков
     explicit Ext2Volume(const std::string& device_path) {
-        initialize_ext2_error_table();
+        ensure_not_mounted(device_path, true);
 
-        int mount_flags = 0;
-        errcode_t err = ext2fs_check_if_mounted(device_path.c_str(), &mount_flags);
-        if (err) {
-            throw std::runtime_error("ext2fs_check_if_mounted error: " + std::string(error_message(err)));
-        }
-        if ((mount_flags & EXT2_MF_MOUNTED) && !(mount_flags & EXT2_MF_READONLY)) {
-            throw std::runtime_error(
-                "Device '" + device_path + "' is mounted read-write! Unmount it or remount read-only first."
-            );
-        }
-
-        err = ext2fs_open(
+        errcode_t err = ext2fs_open(
             device_path.c_str(), EXT2_FLAG_64BITS, 0, 0, unix_io_manager, &fs_
         );
         if (err) {
@@ -91,16 +74,10 @@ void backup_volume(const CliArgs& args) {
         std::cerr << "Warning: Filesystem has errors marked in superblock!\n";
     }
 
-    blk64_t total_blocks = ext2fs_blocks_count(fs->super);
-    blk64_t first_block  = fs->super->s_first_data_block;
-    uint32_t block_size  = fs->blocksize;
-
-    uint64_t total_used_blocks = 0;
-    for (blk64_t blk = first_block; blk < total_blocks; ++blk) {
-        if (ext2fs_test_block_bitmap2(fs->block_map, blk)) {
-            total_used_blocks++;
-        }
-    }
+    blk64_t total_blocks      = ext2fs_blocks_count(fs->super);
+    blk64_t total_used_blocks = total_blocks - ext2fs_free_blocks_count(fs->super);
+    blk64_t first_block       = fs->super->s_first_data_block;
+    uint32_t block_size       = fs->blocksize;
 
     ImageHeader img_hdr{};
     img_hdr.magic = IMAGE_MAGIC;
@@ -119,7 +96,7 @@ void backup_volume(const CliArgs& args) {
 
     blk64_t total_copied_blocks = 0;
 
-    // Чтение непрерывного диапазона используемых блоков с диска, рассчет CRC32 и отправка в выходной поток
+    // Чтение непрерывного диапазона используемых блоков с диска, расчет CRC32 и отправка в выходной поток
     auto flush_chunk = [&](blk64_t start, uint32_t count) {
         if (count == 0) return;
 

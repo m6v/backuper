@@ -8,48 +8,26 @@
 #include <sys/stat.h>
 #include <sys/ioctl.h>
 #include <linux/fs.h>
-#include <ext2fs/ext2fs.h>
 #include "extfs.hpp"
 
 // Чтение count байт из файла (пайпа) или возврат false при EOF
 bool read_exact(int fd, void* buf, size_t count) {
-    size_t total_read = 0;
     char* ptr = static_cast<char*>(buf);
-
-    while (total_read < count) {
-        ssize_t res = ::read(fd, ptr + total_read, count - total_read);
-        if (res == 0) {
-            if (total_read == 0) return false;
-            throw std::runtime_error("Unexpected EOF inside stream (corrupted archive)");
-        }
-        if (res < 0) {
-            if (errno == EINTR) continue;
-            throw std::runtime_error("Read error: " + std::string(strerror(errno)));
-        }
-        total_read += res;
-    }
-    return true;
+    return io_exact(count, [&](size_t off, size_t rem) {
+        return ::read(fd, ptr + off, rem);
+    }, true);
 }
 
 // Запись count байт на диск по заданному смещению (pwrite)
 void pwrite_exact(int fd, const void* buf, size_t count, off_t offset) {
-    size_t total_written = 0;
     const char* ptr = static_cast<const char*>(buf);
-
-    while (total_written < count) {
-        ssize_t res = ::pwrite(fd, ptr + total_written, count - total_written, offset + total_written);
-        if (res <= 0) {
-            if (res < 0 && errno == EINTR) continue;
-            throw std::runtime_error("Write error at offset " + std::to_string(offset));
-        }
-        total_written += res;
-    }
+    io_exact(count, [&](size_t off, size_t rem) {
+        return ::pwrite(fd, ptr + off, rem, offset + off);
+    });
 }
 
 // Проверка целевого раздела, валидация потока по CRC32 и запись блоков на свои места
 void restore_volume(const CliArgs& args) {
-    initialize_ext2_error_table();
-
     struct stat st{};
     bool exists = (::stat(args.dst.c_str(), &st) == 0);
     bool is_dev = (args.dst.rfind("/dev/", 0) == 0);
@@ -61,16 +39,7 @@ void restore_volume(const CliArgs& args) {
         throw std::runtime_error("Target '" + args.dst + "' must be a block device" + (is_dev ? "" : " or regular file") + "!");
     }
 
-    int mount_flags = 0;
-    errcode_t err = ext2fs_check_if_mounted(args.dst.c_str(), &mount_flags);
-    if (err) {
-        throw std::runtime_error("ext2fs_check_if_mounted error: " + std::string(error_message(err)));
-    }
-    if (mount_flags & EXT2_MF_MOUNTED) {
-        throw std::runtime_error(
-            "Target '" + args.dst + "' is currently mounted! Unmount it before restoring."
-        );
-    }
+    ensure_not_mounted(args.dst);
 
     bool is_stdin = (args.src == "-");
     UniqueFd in_fd(
