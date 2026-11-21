@@ -9,6 +9,7 @@
 #include <ext2fs/ext2fs.h>
 #include "format.hpp"
 
+// Записывает count байт из буфера в файл или пайп
 void write_exact(int fd, const void* buf, size_t count) {
     size_t total_written = 0;
     const char* ptr = static_cast<const char*>(buf);
@@ -22,8 +23,10 @@ void write_exact(int fd, const void* buf, size_t count) {
     }
 }
 
+// RAII-обертка над дескриптором файловой системы libext2fs
 class Ext2Volume {
 public:
+    // Проверяет, что ФС не смонтирована в rw, открывает её и загружает карту занятых блоков
     explicit Ext2Volume(const std::string& device_path) {
         initialize_ext2_error_table();
 
@@ -52,18 +55,22 @@ public:
         }
     }
 
+    // Освобождает структуры файловой системы и закрывает устройство
     ~Ext2Volume() {
         if (fs_) ext2fs_close(fs_);
     }
 
     Ext2Volume(const Ext2Volume&) = delete;
     Ext2Volume& operator=(const Ext2Volume&) = delete;
+
+    // Возвращает указатель на открытую структуру ext2_filsys
     ext2_filsys handle() const { return fs_; }
 
 private:
     ext2_filsys fs_ = nullptr;
 };
 
+// Читает занятые блоки ФС, объединяет их в чанки до 4 МБ и пишет в поток с CRC32
 void backup_volume(const CliArgs& args) {
     bool is_stdout = (args.dst == "-");
     UniqueFd out_fd(
@@ -96,7 +103,7 @@ void backup_volume(const CliArgs& args) {
     }
 
     ImageHeader img_hdr{};
-    std::memcpy(img_hdr.magic.data(), "MYEXT4\0\0", img_hdr.magic.size());
+    std::memcpy(img_hdr.magic.data(), "MAKSIMOV", img_hdr.magic.size());
     img_hdr.version = 3;
     img_hdr.block_size = block_size;
     img_hdr.total_blocks = total_blocks;
@@ -112,6 +119,7 @@ void backup_volume(const CliArgs& args) {
 
     blk64_t total_copied_blocks = 0;
 
+    // Читает непрерывный диапазон используемых блоков с диска, считает CRC32 и отправляет в выходной поток
     auto flush_chunk = [&](blk64_t start, uint32_t count) {
         if (count == 0) return;
 
@@ -169,6 +177,7 @@ void backup_volume(const CliArgs& args) {
     std::cerr << "Success! Copied " << total_copied_blocks << " of " << total_blocks
               << " blocks (" << (total_copied_blocks * block_size) / (1024 * 1024) << " MB)\n";
 }
+
 
 int main(int argc, char* argv[]) {
     try {

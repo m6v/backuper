@@ -11,6 +11,7 @@
 #include <ext2fs/ext2fs.h>
 #include "format.hpp"
 
+// Читает count байт из файла или пайпа; возвращает false на чистом EOF
 bool read_exact(int fd, void* buf, size_t count) {
     size_t total_read = 0;
     char* ptr = static_cast<char*>(buf);
@@ -30,6 +31,7 @@ bool read_exact(int fd, void* buf, size_t count) {
     return true;
 }
 
+// Записывает count байт на диск по заданному смещению (pwrite)
 void pwrite_exact(int fd, const void* buf, size_t count, off_t offset) {
     size_t total_written = 0;
     const char* ptr = static_cast<const char*>(buf);
@@ -44,10 +46,10 @@ void pwrite_exact(int fd, const void* buf, size_t count, off_t offset) {
     }
 }
 
+// Проверяет целевой раздел, валидирует поток по CRC32 и записывает блоки на их места
 void restore_volume(const CliArgs& args) {
     initialize_ext2_error_table();
 
-    // Проверка точки назначения (/dev/...)
     struct stat st{};
     bool target_exists = (::stat(args.dst.c_str(), &st) == 0);
     bool is_dev_path = (args.dst.rfind("/dev/", 0) == 0);
@@ -63,7 +65,6 @@ void restore_volume(const CliArgs& args) {
         throw std::runtime_error("Target '" + args.dst + "' must be a block device or a regular file!");
     }
 
-    // Запрет записи в смонтированный раздел
     int mount_flags = 0;
     errcode_t err = ext2fs_check_if_mounted(args.dst.c_str(), &mount_flags);
     if (err) {
@@ -75,7 +76,6 @@ void restore_volume(const CliArgs& args) {
         );
     }
 
-    // Открытие входного потока и целевого устройства через RAII
     bool is_stdin = (args.src == "-");
     UniqueFd in_fd(
         is_stdin ? STDIN_FILENO : ::open(args.src.c_str(), O_RDONLY),
@@ -94,12 +94,11 @@ void restore_volume(const CliArgs& args) {
         throw std::runtime_error("Cannot open target device '" + args.dst + "': " + std::string(strerror(errno)));
     }
 
-    // Чтение и проверка заголовка
     ImageHeader hdr{};
     if (!read_exact(in_fd.get(), &hdr, sizeof(hdr))) {
         throw std::runtime_error("Empty input stream");
     }
-    if (std::memcmp(hdr.magic.data(), "MYEXT4\0\0", hdr.magic.size()) != 0 || hdr.version != 3) {
+    if (std::memcmp(hdr.magic.data(), "MAKSIMOV", hdr.magic.size()) != 0 || hdr.version != 3) {
         throw std::runtime_error("Invalid image format or unsupported version");
     }
 
@@ -125,7 +124,6 @@ void restore_volume(const CliArgs& args) {
     uint64_t restored_blocks = 0;
     bool clean_eof = false;
 
-    // Основной цикл восстановления чанков
     while (true) {
         ChunkHeader chunk{};
         if (!read_exact(in_fd.get(), &chunk, sizeof(chunk))) {
@@ -186,6 +184,7 @@ void restore_volume(const CliArgs& args) {
 
     std::cerr << "Done! Restored " << restored_blocks << " blocks (CRC32 verified).\n";
 }
+
 
 int main(int argc, char* argv[]) {
     try {
