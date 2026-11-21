@@ -3,6 +3,7 @@
 #include <string>
 #include <stdexcept>
 #include <cstring>
+#include <algorithm>
 #include <fcntl.h>
 #include <unistd.h>
 #include <ext2fs/ext2fs.h>
@@ -26,7 +27,6 @@ public:
     explicit Ext2Volume(const std::string& device_path) {
         initialize_ext2_error_table();
 
-        // 1. Проверяем, не смонтирован ли раздел прямо сейчас!
         int mount_flags = 0;
         errcode_t err = ext2fs_check_if_mounted(device_path.c_str(), &mount_flags);
         if (err) {
@@ -38,7 +38,6 @@ public:
             );
         }
 
-        // 2. Открываем ФС
         err = ext2fs_open(
             device_path.c_str(), EXT2_FLAG_64BITS, 0, 0, unix_io_manager, &fs_
         );
@@ -66,13 +65,25 @@ private:
 };
 
 int main(int argc, char* argv[]) {
-    if (argc < 3) {
-        std::cerr << "Usage: " << argv << " <ext4_device_or_image> <output_file_or_->\n";
+    std::vector<std::string> pos_args;
+    int progress_fd = -1;
+
+    for (int i = 1; i < argc; ++i) {
+        std::string arg = argv[i];
+        if (arg == "--progress-fd" && i + 1 < argc) {
+            progress_fd = std::stoi(argv[++i]);
+        } else {
+            pos_args.push_back(arg);
+        }
+    }
+
+    if (pos_args.size() < 2) {
+        std::cerr << "Usage: " << argv[0] << " <source_device> <output_file|-> [--progress-fd N]\n";
         return 1;
     }
 
-    std::string src_path = argv[1];
-    std::string dst_path = argv[2];
+    std::string src_path = pos_args[0];
+    std::string dst_path = pos_args[1];
 
     int out_fd = (dst_path == "-")
         ? STDOUT_FILENO
@@ -87,7 +98,6 @@ int main(int argc, char* argv[]) {
         Ext2Volume vol(src_path);
         ext2_filsys fs = vol.handle();
 
-        // Проверяем чистоту ФС и журнала
         if (fs->super->s_feature_incompat & EXT3_FEATURE_INCOMPAT_RECOVER) {
             throw std::runtime_error("Filesystem has dirty journal (needs recovery). Run e2fsck or mount/umount cleanly first.");
         }
@@ -99,14 +109,25 @@ int main(int argc, char* argv[]) {
         blk64_t first_block  = fs->super->s_first_data_block;
         uint32_t block_size  = fs->blocksize;
 
+        // Подсчитываем точное число занятых блоков по битовой карте для прогресс-бара
+        uint64_t total_used_blocks = 0;
+        for (blk64_t blk = first_block; blk < total_blocks; ++blk) {
+            if (ext2fs_test_block_bitmap2(fs->block_map, blk)) {
+                total_used_blocks++;
+            }
+        }
+
         // Заполняем и подписываем заголовок образа
         ImageHeader img_hdr{};
         std::memcpy(img_hdr.magic, "MYEXT4\0\0", 8);
-        img_hdr.version = 2;
+        img_hdr.version = 3;
         img_hdr.block_size = block_size;
         img_hdr.total_blocks = total_blocks;
+        img_hdr.used_blocks = total_used_blocks;
         img_hdr.header_crc32 = compute_crc32(&img_hdr, offsetof(ImageHeader, header_crc32));
         write_exact(out_fd, &img_hdr, sizeof(img_hdr));
+
+        ProgressReporter progress(progress_fd, total_used_blocks);
 
         const size_t MAX_CHUNK_BYTES = 4 * 1024 * 1024;
         const uint32_t max_blocks_per_chunk = std::max<uint32_t>(1, MAX_CHUNK_BYTES / block_size);
@@ -133,6 +154,7 @@ int main(int argc, char* argv[]) {
             write_exact(out_fd, buffer.data(), bytes_to_read);
 
             total_copied_blocks += count;
+            progress.update(total_copied_blocks);
         };
 
         blk64_t chunk_start = 0;
@@ -157,7 +179,6 @@ int main(int argc, char* argv[]) {
             flush_chunk(chunk_start, chunk_count);
         }
 
-        // Маркер конца потока (также защищенный CRC32)
         ChunkHeader eof_hdr{};
         eof_hdr.start_block = 0;
         eof_hdr.block_count = 0;
@@ -166,6 +187,7 @@ int main(int argc, char* argv[]) {
         write_exact(out_fd, &eof_hdr, sizeof(eof_hdr));
 
         if (out_fd != STDOUT_FILENO) ::close(out_fd);
+        progress.finish();
 
         std::cerr << "Success! Copied " << total_copied_blocks << " of " << total_blocks
                   << " blocks (" << (total_copied_blocks * block_size) / (1024 * 1024) << " MB)\n";

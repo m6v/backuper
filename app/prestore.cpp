@@ -5,6 +5,7 @@
 #include <cstring>
 #include <fcntl.h>
 #include <unistd.h>
+#include <sys/stat.h>
 #include <sys/ioctl.h>
 #include <linux/fs.h>
 #include <ext2fs/ext2fs.h>
@@ -43,10 +44,26 @@ void pwrite_exact(int fd, const void* buf, size_t count, off_t offset) {
     }
 }
 
-void restore_image(const std::string& src_path, const std::string& dst_path) {
+void restore_image(const std::string& src_path, const std::string& dst_path, int progress_fd) {
     initialize_ext2_error_table();
 
-    // 0. Жестко запрещаем восстановление на любой смонтированный раздел (даже в read-only!)
+    // 0. Проверяем целевой путь (защита от опечаток в /dev/...)
+    struct stat st{};
+    bool target_exists = (::stat(dst_path.c_str(), &st) == 0);
+    bool is_dev_path = (dst_path.rfind("/dev/", 0) == 0); // начинается ли путь с "/dev/"
+
+    if (is_dev_path) {
+        if (!target_exists) {
+            throw std::runtime_error("Target device '" + dst_path + "' does not exist!");
+        }
+        if (!S_ISBLK(st.st_mode)) {
+            throw std::runtime_error("Target '" + dst_path + "' is in /dev/ but is NOT a block device!");
+        }
+    } else if (target_exists && !S_ISBLK(st.st_mode) && !S_ISREG(st.st_mode)) {
+        throw std::runtime_error("Target '" + dst_path + "' must be a block device or a regular file!");
+    }
+
+    // 1. Запрещаем восстановление на любой смонтированный раздел
     int mount_flags = 0;
     errcode_t err = ext2fs_check_if_mounted(dst_path.c_str(), &mount_flags);
     if (err) {
@@ -63,7 +80,9 @@ void restore_image(const std::string& src_path, const std::string& dst_path) {
         throw std::runtime_error("Cannot open source image: " + std::string(strerror(errno)));
     }
 
-    int out_fd = ::open(dst_path.c_str(), O_WRONLY | O_CREAT, 0644);
+    // 2. Открываем целевое устройство (флаг O_CREAT разрешаем только вне /dev/)
+    int open_flags = O_WRONLY | (is_dev_path ? 0 : O_CREAT);
+    int out_fd = ::open(dst_path.c_str(), open_flags, 0644);
     if (out_fd < 0) {
         if (in_fd != STDIN_FILENO) ::close(in_fd);
         throw std::runtime_error("Cannot open target device: " + std::string(strerror(errno)));
@@ -74,11 +93,10 @@ void restore_image(const std::string& src_path, const std::string& dst_path) {
         if (!read_exact(in_fd, &hdr, sizeof(hdr))) {
             throw std::runtime_error("Empty input stream");
         }
-        if (std::memcmp(hdr.magic, "MYEXT4\0\0", 8) != 0 || hdr.version != 2) {
+        if (std::memcmp(hdr.magic, "MYEXT4\0\0", 8) != 0 || hdr.version != 3) {
             throw std::runtime_error("Invalid image format or unsupported version");
         }
 
-        // Проверяем контрольную сумму главного заголовка
         uint32_t expected_hdr_crc = compute_crc32(&hdr, offsetof(ImageHeader, header_crc32));
         if (hdr.header_crc32 != expected_hdr_crc) {
             throw std::runtime_error("ImageHeader CRC32 mismatch! Header is corrupted.");
@@ -95,6 +113,8 @@ void restore_image(const std::string& src_path, const std::string& dst_path) {
         std::cerr << "Restoring ext4 (block size: " << hdr.block_size
                   << ", total blocks: " << hdr.total_blocks << ")...\n";
 
+        ProgressReporter progress(progress_fd, hdr.used_blocks);
+
         std::vector<char> buffer;
         uint64_t restored_blocks = 0;
         bool clean_eof = false;
@@ -105,7 +125,6 @@ void restore_image(const std::string& src_path, const std::string& dst_path) {
                 break;
             }
 
-            // 1. Проверяем CRC32 заголовка чанка ДО любых операций с диском
             uint32_t expected_chunk_hdr_crc = compute_crc32(&chunk, offsetof(ChunkHeader, header_crc32));
             if (chunk.header_crc32 != expected_chunk_hdr_crc) {
                 throw std::runtime_error("ChunkHeader CRC32 mismatch! Stream is corrupted.");
@@ -129,7 +148,6 @@ void restore_image(const std::string& src_path, const std::string& dst_path) {
                 throw std::runtime_error("Truncated chunk data");
             }
 
-            // 2. Проверяем CRC32 полезных данных чанка ДО записи на диск
             uint32_t actual_data_crc = compute_crc32(buffer.data(), data_bytes);
             if (chunk.data_crc32 != actual_data_crc) {
                 throw std::runtime_error(
@@ -141,6 +159,7 @@ void restore_image(const std::string& src_path, const std::string& dst_path) {
             pwrite_exact(out_fd, buffer.data(), data_bytes, disk_offset);
 
             restored_blocks += chunk.block_count;
+            progress.update(restored_blocks);
         }
 
         if (!clean_eof) {
@@ -155,6 +174,7 @@ void restore_image(const std::string& src_path, const std::string& dst_path) {
         }
 
         ::fsync(out_fd);
+        progress.finish();
         std::cerr << "Done! Restored " << restored_blocks << " blocks (CRC32 verified).\n";
 
     } catch (...) {
@@ -168,13 +188,25 @@ void restore_image(const std::string& src_path, const std::string& dst_path) {
 }
 
 int main(int argc, char* argv[]) {
-    if (argc < 3) {
-        std::cerr << "Usage: " << argv[0] << " <input_image_or_-> <target_device_or_image>\n";
+    std::vector<std::string> pos_args;
+    int progress_fd = -1;
+
+    for (int i = 1; i < argc; ++i) {
+        std::string arg = argv[i];
+        if (arg == "--progress-fd" && i + 1 < argc) {
+            progress_fd = std::stoi(argv[++i]);
+        } else {
+            pos_args.push_back(arg);
+        }
+    }
+
+    if (pos_args.size() < 2) {
+        std::cerr << "Usage: " << argv[0] << " <input_file|-> <target_device> [--progress-fd N]\n";
         return 1;
     }
 
     try {
-        restore_image(argv[1], argv[2]);
+        restore_image(pos_args[0], pos_args[1], progress_fd);
     } catch (const std::exception& e) {
         std::cerr << "Fatal: " << e.what() << "\n";
         return 1;
