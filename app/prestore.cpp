@@ -47,7 +47,7 @@ void pwrite_exact(int fd, const void* buf, size_t count, off_t offset) {
 void restore_volume(const CliArgs& args) {
     initialize_ext2_error_table();
 
-    // 1. Защита от опечаток в /dev/...
+    // Проверка точки назначения (/dev/...)
     struct stat st{};
     bool target_exists = (::stat(args.dst.c_str(), &st) == 0);
     bool is_dev_path = (args.dst.rfind("/dev/", 0) == 0);
@@ -63,7 +63,7 @@ void restore_volume(const CliArgs& args) {
         throw std::runtime_error("Target '" + args.dst + "' must be a block device or a regular file!");
     }
 
-    // 2. Запрет записи в любой смонтированный раздел
+    // Запрет записи в смонтированный раздел
     int mount_flags = 0;
     errcode_t err = ext2fs_check_if_mounted(args.dst.c_str(), &mount_flags);
     if (err) {
@@ -75,7 +75,7 @@ void restore_volume(const CliArgs& args) {
         );
     }
 
-    // 3. Открытие входного потока и целевого устройства через RAII
+    // Открытие входного потока и целевого устройства через RAII
     bool is_stdin = (args.src == "-");
     UniqueFd in_fd(
         is_stdin ? STDIN_FILENO : ::open(args.src.c_str(), O_RDONLY),
@@ -94,7 +94,7 @@ void restore_volume(const CliArgs& args) {
         throw std::runtime_error("Cannot open target device '" + args.dst + "': " + std::string(strerror(errno)));
     }
 
-    // 4. Чтение и проверка заголовка
+    // Чтение и проверка заголовка
     ImageHeader hdr{};
     if (!read_exact(in_fd.get(), &hdr, sizeof(hdr))) {
         throw std::runtime_error("Empty input stream");
@@ -125,7 +125,7 @@ void restore_volume(const CliArgs& args) {
     uint64_t restored_blocks = 0;
     bool clean_eof = false;
 
-    // 5. Основной цикл восстановления чанков
+    // Основной цикл восстановления чанков
     while (true) {
         ChunkHeader chunk{};
         if (!read_exact(in_fd.get(), &chunk, sizeof(chunk))) {

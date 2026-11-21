@@ -119,7 +119,7 @@ inline uint32_t compute_crc32(const void* data, size_t length, uint32_t initial 
     return ~crc;
 }
 
-// Вывод прогресса в заданный FD для whiptail / dialog / zenity
+// Вывод прогресса в заданный дескриптор (fd) для whiptail и аналогов (dialog, zenity)
 class ProgressReporter {
 public:
     ProgressReporter(int fd, uint64_t total_blocks, uint32_t block_size)
@@ -163,7 +163,7 @@ public:
 
             write_status(100, total_, speed_mbps);
             last_pct_ = 100;
-            fd_.reset(); // Закрываем FD сразу, чтобы whiptail получил EOF до возврата из функции
+            fd_.reset(); // Закрытие fd, чтобы whiptail получил EOF до возврата из функции
         }
     }
 
