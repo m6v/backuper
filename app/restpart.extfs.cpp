@@ -11,7 +11,7 @@
 #include <ext2fs/ext2fs.h>
 #include "extfs.hpp"
 
-// Читает count байт из файла или пайпа; возвращает false на чистом EOF
+// Чтение count байт из файла или пайпа; возврат false на чистом EOF
 bool read_exact(int fd, void* buf, size_t count) {
     size_t total_read = 0;
     char* ptr = static_cast<char*>(buf);
@@ -31,7 +31,7 @@ bool read_exact(int fd, void* buf, size_t count) {
     return true;
 }
 
-// Записывает count байт на диск по заданному смещению (pwrite)
+// Запись count байт на диск по заданному смещению (pwrite)
 void pwrite_exact(int fd, const void* buf, size_t count, off_t offset) {
     size_t total_written = 0;
     const char* ptr = static_cast<const char*>(buf);
@@ -46,7 +46,7 @@ void pwrite_exact(int fd, const void* buf, size_t count, off_t offset) {
     }
 }
 
-// Проверяет целевой раздел, валидирует поток по CRC32 и записывает блоки на их места
+// Проверка целевого раздела, валидация потока по CRC32 и запись блоков на свои места
 void restore_volume(const CliArgs& args) {
     initialize_ext2_error_table();
 

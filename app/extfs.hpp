@@ -12,7 +12,7 @@
 
 #pragma pack(push, 1)
 
-inline constexpr std::array<char, 8> IMAGE_MAGIC = {'E', 'X', 'T', '4', 'P', 'A', 'R', 'T'};
+inline constexpr std::array<char, 8> IMAGE_MAGIC = {'E', 'X', 'T', 'I', 'M', 'A', 'G', 'E'};
 inline constexpr uint32_t IMAGE_VERSION = 3;
 
 struct ImageHeader {
@@ -35,11 +35,11 @@ struct ChunkHeader {
 // RAII-обертка над системным файловым дескриптором
 class UniqueFd {
 public:
-    // Сохраняет дескриптор и флаг необходимости его автоматического закрытия
+    // Сохранение дескриптора и флага необходимости его автоматического закрытия
     explicit UniqueFd(int fd = -1, bool auto_close = true)
         : fd_(fd), auto_close_(auto_close) {}
 
-    // Гарантированно закрывает дескриптор при выходе объекта из области видимости
+    // Гарантированное закрытие дескриптора при выходе объекта из области видимости
     ~UniqueFd() {
         reset();
     }
@@ -47,7 +47,7 @@ public:
     UniqueFd(const UniqueFd&) = delete;
     UniqueFd& operator=(const UniqueFd&) = delete;
 
-    // Закрывает текущий дескриптор (если разрешено) и заменяет его новым
+    // Закрытие текущего дескриптора (если разрешено) и замена его новым
     void reset(int new_fd = -1, bool auto_close = true) {
         if (auto_close_ && fd_ >= 0) {
             ::close(fd_);
@@ -56,10 +56,10 @@ public:
         auto_close_ = auto_close;
     }
 
-    // Возвращает сырой файловый дескриптор для системных вызовов
+    // Возврат сырого файлового дескриптора для системных вызовов
     int get() const { return fd_; }
 
-    // Проверяет, валиден ли дескриптор (>= 0)
+    // Проверка валидности дескриптора (>= 0)
     explicit operator bool() const { return fd_ >= 0; }
 
 private:
@@ -73,7 +73,7 @@ struct CliArgs {
     int progress_fd = -1;
 };
 
-// Разбирает опции (--status-fd / -s <FD>, --help / -h) и два позиционных аргумента
+// Разбор опций (--status-fd / -s <FD>, --help / -h) и двух позиционных аргументов src и dst
 inline CliArgs parse_cli_args(int argc, char* argv[],
                               const std::string& description,
                               const std::string& usage_hint) {
@@ -118,7 +118,7 @@ inline CliArgs parse_cli_args(int argc, char* argv[],
     return res;
 }
 
-// Вычисляет контрольную сумму CRC32 (IEEE 802.3) с использованием таблицы, сгенерированной при компиляции
+// Вычисление контрольной суммы CRC32 (IEEE 802.3) с использованием таблицы, сгенерированной при компиляции
 inline uint32_t compute_crc32(const void* data, size_t length, uint32_t initial = 0) {
     static constexpr auto table = []() {
         std::array<uint32_t, 256> t{};
@@ -140,10 +140,10 @@ inline uint32_t compute_crc32(const void* data, size_t length, uint32_t initial 
     return ~crc;
 }
 
-// Управляет выводом прогресса и скорости (МБ/с) в заданный FD для whiptail/dialog
+// Управление выводом прогресса и скорости (МБ/с) в заданный FD (для whiptail/dialog)
 class ProgressReporter {
 public:
-    // Инициализирует таймер, запоминает общий объем и отправляет начальный 0%
+    // Инициализация таймера, запоминание общего объема и отправка начального 0%
     ProgressReporter(int fd, uint64_t total_blocks, uint32_t block_size)
         : fd_(fd, fd >= 0 && fd != STDOUT_FILENO && fd != STDERR_FILENO),
           total_(total_blocks),
@@ -156,7 +156,7 @@ public:
         }
     }
 
-    // Периодически (не чаще раза в 250 мс) рассчитывает процент и среднюю скорость
+    // Периодический (не чаще раза в 250 мс) рассчет процента и средней скорости
     void update(uint64_t current_blocks) {
         if (!fd_ || total_ == 0) return;
 
@@ -177,7 +177,7 @@ public:
         }
     }
 
-    // Отправляет финальные 100% и закрывает FD, чтобы внешний диалог получил EOF и закрылся
+    // Отправка финальных 100% и закрытие FD, чтобы внешний диалог получил EOF и закрылся
     void finish() {
         if (fd_) {
             auto now = std::chrono::steady_clock::now();
@@ -192,7 +192,7 @@ public:
     }
 
 private:
-    // Форматирует и записывает статус в формате XXX для whiptail/dialog
+    // Форматирование и запись статуса в формате XXX для whiptail/dialog
     void write_status(int pct, uint64_t current_blocks, double speed_mbps) {
         uint64_t copied_mb = (current_blocks * block_size_) / (1024 * 1024);
         uint64_t total_mb  = (total_ * block_size_) / (1024 * 1024);
