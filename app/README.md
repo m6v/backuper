@@ -18,6 +18,18 @@
 2. Потоковая верификация (CRC32) (утилита читает поток из файла или стандартного входа (stdin — например, распакованный поток от zstd -dc), до записи на диск для каждого чанка сверяются контрольные суммы заголовка и данных, при малейшем битовом сбое или обрыве архива запись прерывается, предотвращая порчу данных на диске, если входной поток неожиданно закроется (системный EOF) до получения логического маркера завершения (block_count = 0), утилита зафиксирует обрыв архива и сообщит об ошибке.
 3. Прямая адресная запись (pwrite) (проверенные блоки данных записываются строго по своим исходным смещениям на целевом разделе, а свободные участки пропускаются, после получения специального маркера штатного завершения потока (EOF) вызывается fsync() для гарантированного сброса кэша ядра на физический носитель).
 
+## Тестирование
+```
+cd /tmp
+mkdir -p src dst
+# Здесь в зависимости от типа раздела делаем бэкап src.img и восстановление в dst.img
+mount -o loop,ro src.img src
+mount -o loop,ro dst.img dst
+diff -rq --no-dereference src dst
+umount src
+umount dst
+```
+
 ## Использование
 Утилиты не имеют графического интерефйса и не одеспечивают сжатия.
 - сжатие делегируется специализированным внешним архиваторам через Unix-пайпы.
@@ -25,17 +37,17 @@
 
 Бэкап файла или раздела с образом
 ```bash
-backpart.extfs --status-fd 3 /tmp/src.img - 2>/dev/null 3> >(whiptail --title "Backup" --gauge "Инициализация..." 9 65 0 > /dev/tty) | zstd -T0 -f -q -o backup.img.zst
+partback.extfs --status-fd 3 /tmp/src.img - 2>/dev/null 3> >(whiptail --title "Backup" --gauge "Инициализация..." 9 65 0 > /dev/tty) | zstd -T0 -f -q -o backup.img
 ```
 
 Восстановление файла или раздела из образа
 ```bash
-zstd -dc -q backup.img.zst | restpart.extfs --status-fd 3 - /tmp/dst.img 2>/dev/null 3> >(whiptail --title "Restore" --gauge "Инициализация..." 9 65 0 > /dev/tty)
+zstd -dc -q backup.img | partrest.all --status-fd 3 - /tmp/dst.img 2>/dev/null 3> >(whiptail --title "Restore" --gauge "Инициализация..." 9 65 0 > /dev/tty)
 ```
 
 Проверка целостности образа
 ```
-zstd -dc -q backup.img.zst | restpart.extfs --verify -
+zstd -dc -q backup.img | partrest.all --verify -
 ```
 
 ## Бэкап ESP

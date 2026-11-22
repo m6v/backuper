@@ -9,7 +9,7 @@
 #include <sys/file.h>
 #include <sys/ioctl.h>
 #include <linux/fs.h>
-#include "extfs.hpp"
+#include "partimg.hpp"
 
 // Чтение count байт из файла (пайпа) или возврат false при EOF
 bool read_exact(int fd, void* buf, size_t count) {

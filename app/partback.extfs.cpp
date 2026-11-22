@@ -8,7 +8,7 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <ext2fs/ext2fs.h>
-#include "extfs.hpp"
+#include "partimg.hpp"
 
 // Запись count байт из буфера в файл или пайп
 void write_exact(int fd, const void* buf, size_t count) {

@@ -14,6 +14,10 @@
 #include <zlib.h>
 #include <ext2fs/ext2fs.h>
 
+#include <mntent.h>
+#include <limits.h>
+
+
 inline constexpr std::array<char, 8> IMAGE_MAGIC = {'E', 'X', 'T', 'I', 'M', 'A', 'G', 'E'};
 inline constexpr uint32_t IMAGE_VERSION = 3;
 
@@ -61,14 +65,36 @@ inline bool io_exact(size_t count, Func&& op, bool allow_clean_eof = false) {
     return true;
 }
 
-// Проверка, что устройство не смонтировано (или смонтировано только в ro, если разрешено)
+// Проверка через /proc/mounts, не смонтировано ли устройство (учитывает симлинки /dev/disk/by-*)
 inline void ensure_not_mounted(const std::string& path, bool allow_readonly = false) {
-    initialize_ext2_error_table();
-    int flags = 0;
-    if (errcode_t err = ext2fs_check_if_mounted(path.c_str(), &flags)) {
-        throw std::runtime_error("Mount check error: " + std::string(error_message(err)));
+    char target_real[PATH_MAX];
+    const char* resolved_target = ::realpath(path.c_str(), target_real);
+    std::string target_dev = resolved_target ? resolved_target : path;
+
+    FILE* mtab = ::setmntent("/proc/mounts", "r");
+    if (!mtab) {
+        throw std::runtime_error("Cannot open /proc/mounts to check mount status");
     }
-    if ((flags & EXT2_MF_MOUNTED) && !(allow_readonly && (flags & EXT2_MF_READONLY))) {
+
+    struct mntent* entry = nullptr;
+    bool is_mounted = false;
+    bool is_ro = false;
+
+    while ((entry = ::getmntent(mtab)) != nullptr) {
+        if (entry->mnt_fsname[0] != '/') continue;
+        char mnt_real[PATH_MAX];
+        const char* resolved_mnt = ::realpath(entry->mnt_fsname, mnt_real);
+        std::string mnt_dev = resolved_mnt ? resolved_mnt : entry->mnt_fsname;
+
+        if (mnt_dev == target_dev) {
+            is_mounted = true;
+            is_ro = (::hasmntopt(entry, MNTOPT_RO) != nullptr);
+            break;
+        }
+    }
+    ::endmntent(mtab);
+
+    if (is_mounted && !(allow_readonly && is_ro)) {
         throw std::runtime_error("Device '" + path + "' is mounted! Unmount it first.");
     }
 }

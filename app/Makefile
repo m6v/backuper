@@ -1,27 +1,34 @@
 CXX      := g++
 CXXFLAGS := -std=c++17 -O2 -Wall -Wextra -Wpedantic
 
-LDFLAGS        := -lext2fs -lcom_err -lz
-LDFLAGS_STATIC := -static -lext2fs -lcom_err -lz -lpthread
+LDFLAGS_EXTFS   := -lext2fs -lcom_err -lz
+LDFLAGS_GENERIC := -lz
+
+STATIC_EXTFS    := -static -lext2fs -lcom_err -lz -lpthread
+STATIC_GENERIC  := -static -lz
 
 PREFIX  ?= /usr/local
 BINDIR  := $(DESTDIR)$(PREFIX)/bin
 
-TARGETS := backpart.extfs restpart.extfs
+TARGETS := partback.extfs partback.dd partrest.all
 
 .PHONY: build static install uninstall clean
 
 build: $(TARGETS)
 
-backpart.extfs: backpart.extfs.cpp extfs.hpp
-	$(CXX) $(CXXFLAGS) backpart.extfs.cpp -o $@ $(LDFLAGS)
+partback.extfs: partback.extfs.cpp partimg.hpp
+	$(CXX) $(CXXFLAGS) partback.extfs.cpp -o $@ $(LDFLAGS_EXTFS)
 
-restpart.extfs: restpart.extfs.cpp extfs.hpp
-	$(CXX) $(CXXFLAGS) restpart.extfs.cpp -o $@ $(LDFLAGS)
+partback.dd: partback.dd.cpp partimg.hpp
+	$(CXX) $(CXXFLAGS) partback.dd.cpp -o $@ $(LDFLAGS_GENERIC)
 
-static: backpart.extfs.cpp restpart.extfs.cpp extfs.hpp
-	$(CXX) $(CXXFLAGS) backpart.extfs.cpp -o backpart.extfs $(LDFLAGS_STATIC)
-	$(CXX) $(CXXFLAGS) restpart.extfs.cpp -o restpart.extfs $(LDFLAGS_STATIC)
+partrest.all: partrest.all.cpp partimg.hpp
+	$(CXX) $(CXXFLAGS) partrest.all.cpp -o $@ $(LDFLAGS_GENERIC)
+
+static: partback.extfs.cpp partback.dd.cpp partrest.all.cpp partimg.hpp
+	$(CXX) $(CXXFLAGS) partback.extfs.cpp -o partback.extfs $(STATIC_EXTFS)
+	$(CXX) $(CXXFLAGS) partback.dd.cpp -o partback.dd $(STATIC_GENERIC)
+	$(CXX) $(CXXFLAGS) partrest.all.cpp -o partrest.all $(STATIC_GENERIC)
 	strip $(TARGETS)
 
 install: build
