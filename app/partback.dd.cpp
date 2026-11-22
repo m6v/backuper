@@ -1,5 +1,4 @@
 #include <iostream>
-#include <vector>
 #include <string>
 #include <stdexcept>
 #include <cstring>
@@ -12,15 +11,7 @@
 #include <linux/fs.h>
 #include "partimg.hpp"
 
-// Запись count байт из буфера в файл или пайп
-void write_exact(int fd, const void* buf, size_t count) {
-    const char* ptr = static_cast<const char*>(buf);
-    io_exact(count, [&](size_t off, size_t rem) {
-        return ::write(fd, ptr + off, rem);
-    });
-}
-
-// Полное посекторное чтение источника (раздела или файла) и упаковка в формат EXTIMAGE
+// Полное посекторное чтение источника (раздела или файла) и упаковка через ImageWriter
 void backup_raw_volume(const CliArgs& args) {
     struct stat st{};
     if (::stat(args.src.c_str(), &st) != 0) {
@@ -63,68 +54,20 @@ void backup_raw_volume(const CliArgs& args) {
 
     uint64_t total_blocks = total_bytes / block_size;
 
-    bool is_stdout = (args.dst == "-");
-    UniqueFd out_fd(
-        is_stdout ? STDOUT_FILENO : ::open(args.dst.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644),
-        !is_stdout
-    );
-    if (!out_fd) {
-        throw std::runtime_error("Cannot open output '" + args.dst + "': " + std::string(strerror(errno)));
-    }
-
-    ImageHeader img_hdr{};
-    img_hdr.magic = IMAGE_MAGIC;
-    img_hdr.version = IMAGE_VERSION;
-    img_hdr.block_size = block_size;
-    img_hdr.total_blocks = total_blocks;
-    img_hdr.used_blocks = total_blocks; // В raw-режиме копируются все блоки
-    img_hdr.header_crc32 = compute_crc32(&img_hdr, offsetof(ImageHeader, header_crc32));
-    write_exact(out_fd.get(), &img_hdr, sizeof(img_hdr));
-
-    ProgressReporter progress(args.progress_fd, total_blocks, block_size);
-
-    constexpr size_t MAX_CHUNK_BYTES = 4 * 1024 * 1024;
-    const uint32_t max_blocks_per_chunk = MAX_CHUNK_BYTES / block_size;
-    std::vector<char> buffer(MAX_CHUNK_BYTES);
-
-    uint64_t current_block = 0;
-
-    while (current_block < total_blocks) {
-        uint32_t blocks_to_read = static_cast<uint32_t>(
-            std::min<uint64_t>(max_blocks_per_chunk, total_blocks - current_block)
-        );
-        size_t bytes_to_read = static_cast<size_t>(blocks_to_read) * block_size;
-
-        // Чтение ровно bytes_to_read байт с диска
-        io_exact(bytes_to_read, [&](size_t off, size_t rem) {
-            return ::read(in_fd.get(), buffer.data() + off, rem);
+    auto read_blocks = [&](uint64_t start, uint32_t count, char* dst) {
+        size_t bytes = static_cast<size_t>(count) * block_size;
+        io_exact(bytes, [&](size_t off, size_t rem) {
+            return ::pread(in_fd.get(), dst + off, rem, static_cast<off_t>(start) * block_size + off);
         });
+    };
 
-        ChunkHeader chunk_hdr{};
-        chunk_hdr.start_block = current_block;
-        chunk_hdr.block_count = blocks_to_read;
-        chunk_hdr.header_crc32 = compute_crc32(&chunk_hdr, offsetof(ChunkHeader, header_crc32));
-        chunk_hdr.data_crc32 = compute_crc32(buffer.data(), bytes_to_read);
-
-        write_exact(out_fd.get(), &chunk_hdr, sizeof(chunk_hdr));
-        write_exact(out_fd.get(), buffer.data(), bytes_to_read);
-
-        current_block += blocks_to_read;
-        progress.update(current_block);
+    ImageWriter writer(args, block_size, total_blocks, total_blocks);
+    const uint32_t step = std::max<uint32_t>(1, (4 * 1024 * 1024) / block_size);
+    for (uint64_t blk = 0; blk < total_blocks; blk += step) {
+        uint32_t count = static_cast<uint32_t>(std::min<uint64_t>(step, total_blocks - blk));
+        writer.write_range(blk, count, read_blocks);
     }
-
-    ChunkHeader eof_hdr{};
-    eof_hdr.start_block = 0;
-    eof_hdr.block_count = 0;
-    eof_hdr.header_crc32 = compute_crc32(&eof_hdr, offsetof(ChunkHeader, header_crc32));
-    eof_hdr.data_crc32 = 0;
-    write_exact(out_fd.get(), &eof_hdr, sizeof(eof_hdr));
-
-    out_fd.reset();
-    progress.finish();
-
-    std::cerr << "Success! Copied " << current_block << " blocks ("
-              << (current_block * block_size) / (1024 * 1024) << " MB)\n";
+    writer.finish(read_blocks);
 }
 
 // Точка входа: разбирает аргументы, запускает raw-бэкап и перехватывает ошибки
