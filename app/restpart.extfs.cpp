@@ -93,7 +93,7 @@ void restore_volume(const CliArgs& args) {
             }
         }
 
-        // Фаза 1: затираем начало раздела (основной суперблок), чтобы недописанная ФС не монтировалась
+        // Затирание начала раздела (основного суперблока) для предотвращения монтирования после нештатного прекращения работы
         std::vector<char> zero_sb(hdr.block_size, 0);
         pwrite_exact(out_fd.get(), zero_sb.data(), zero_sb.size(), 0);
         ::fsync(out_fd.get());

@@ -10,7 +10,7 @@
 #include <ext2fs/ext2fs.h>
 #include "extfs.hpp"
 
-// Записывает count байт из буфера в файл или пайп
+// Запись count байт из буфера в файл или пайп
 void write_exact(int fd, const void* buf, size_t count) {
     const char* ptr = static_cast<const char*>(buf);
     io_exact(count, [&](size_t off, size_t rem) {
