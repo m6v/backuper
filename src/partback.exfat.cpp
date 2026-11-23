@@ -53,13 +53,7 @@ void pread_exact(int fd, void* buf, size_t count, off_t offset) {
 void backup_exfat_volume(const CliArgs& args) {
     ensure_not_mounted(args.src, true);
 
-    UniqueFd in_fd(::open(args.src.c_str(), O_RDONLY), true);
-    if (!in_fd) {
-        throw std::runtime_error("Cannot open source '" + args.src + "': " + std::string(strerror(errno)));
-    }
-    if (::flock(in_fd.get(), LOCK_SH | LOCK_NB) != 0) {
-        throw std::runtime_error("Source '" + args.src + "' is locked by an exclusive operation!");
-    }
+    UniqueFd in_fd = UniqueFd::open_locked(args.src, O_RDONLY, LOCK_SH);
     ::posix_fadvise(in_fd.get(), 0, 0, POSIX_FADV_SEQUENTIAL | POSIX_FADV_NOREUSE);
 
     ExfatBootSector vbr{};

@@ -3,6 +3,7 @@
 #include <string>
 #include <stdexcept>
 #include <cstring>
+#include <algorithm>
 #include <fcntl.h>
 #include <unistd.h>
 #include <sys/stat.h>
@@ -29,7 +30,7 @@ void pwrite_exact(int fd, const void* buf, size_t count, off_t offset) {
     });
 }
 
-// Проверка архива (и запись блоков на диск с атомарной фиксацией суперблока, если не --verify)
+// Запись блоков на диск с атомарной фиксацией начала раздела или проверка архива, если задана --verify
 void restore_volume(const CliArgs& args) {
     bool is_dev = false;
     UniqueFd out_fd;
@@ -49,15 +50,7 @@ void restore_volume(const CliArgs& args) {
         ensure_not_mounted(args.dst);
 
         int open_flags = O_WRONLY | (is_dev ? 0 : O_CREAT);
-        out_fd.reset(::open(args.dst.c_str(), open_flags, 0644), true);
-        if (!out_fd) {
-            throw std::runtime_error("Cannot open target device '" + args.dst + "': " + std::string(strerror(errno)));
-        }
-
-        // Эксклюзивная блокировка устройства (защита от гонок с udev и параллельных процессов)
-        if (::flock(out_fd.get(), LOCK_EX | LOCK_NB) != 0) {
-            throw std::runtime_error("Target '" + args.dst + "' is busy (locked by another process or udev)!");
-        }
+        out_fd = UniqueFd::open_locked(args.dst, open_flags, LOCK_EX, 0644);
     }
 
     bool is_stdin = (args.src == "-");
@@ -85,30 +78,44 @@ void restore_volume(const CliArgs& args) {
     if (hdr.header_crc32 != expected_hdr_crc) {
         throw std::runtime_error("ImageHeader CRC32 mismatch! Header is corrupted.");
     }
+    if (hdr.block_size == 0) {
+        throw std::runtime_error("Invalid block size (0) in ImageHeader");
+    }
 
-    uint64_t target_bytes = 0;
+    const uint64_t required_bytes = hdr.total_blocks * hdr.block_size;
+    bool is_blk_dev = false;
+
+    // Размер защитной зоны в начале раздела (минимум 4096 байт, чтобы гарантированно накрыть суперблок ext4/VBR)
+    const size_t head_guard_bytes = static_cast<size_t>(
+        std::min<uint64_t>(required_bytes, std::max<uint64_t>(4096, hdr.block_size))
+    );
+
     if (!args.verify_only) {
-        if (ioctl(out_fd.get(), BLKGETSIZE64, &target_bytes) == 0) {
-            uint64_t required_bytes = hdr.total_blocks * hdr.block_size;
+        uint64_t target_bytes = 0;
+        if (::ioctl(out_fd.get(), BLKGETSIZE64, &target_bytes) == 0) {
+            is_blk_dev = true;
             if (target_bytes < required_bytes) {
                 throw std::runtime_error("Target device is smaller than original filesystem!");
             }
         }
 
-        // Затирание начала раздела (основного суперблока) для предотвращения монтирования после нештатного прекращения работы
-        std::vector<char> zero_sb(hdr.block_size, 0);
-        pwrite_exact(out_fd.get(), zero_sb.data(), zero_sb.size(), 0);
-        ::fsync(out_fd.get());
+        // Затирание начала раздела (суперблока/VBR) для предотвращения монтирования при сбое
+        if (head_guard_bytes > 0) {
+            std::vector<char> zero_head(head_guard_bytes, 0);
+            pwrite_exact(out_fd.get(), zero_head.data(), zero_head.size(), 0);
+            ::fsync(out_fd.get());
+        }
     }
 
     std::cerr << (args.verify_only ? "Verifying" : "Restoring")
-              << " ext4 (block size: " << hdr.block_size
+              << " image (block size: " << hdr.block_size
               << ", total blocks: " << hdr.total_blocks << ")...\n";
 
     ProgressReporter progress(args.progress_fd, hdr.used_blocks, hdr.block_size);
 
+    constexpr size_t MAX_ALLOWED_CHUNK_BYTES = 64 * 1024 * 1024;
     std::vector<char> buffer;
-    std::vector<char> first_chunk; // Буфер для отложенной записи первого чанка (с суперблоком)
+    std::vector<std::pair<off_t, std::vector<char>>> deferred_head_chunks; // Отложенные чанки из начала раздела
     uint64_t restored_blocks = 0;
     bool clean_eof = false;
 
@@ -128,11 +135,16 @@ void restore_volume(const CliArgs& args) {
             break;
         }
 
-        if (chunk.start_block + chunk.block_count > hdr.total_blocks) {
+        if (chunk.start_block > hdr.total_blocks ||
+            chunk.block_count > hdr.total_blocks - chunk.start_block) {
             throw std::runtime_error("Corrupted chunk: block range exceeds filesystem size");
         }
 
         size_t data_bytes = static_cast<size_t>(chunk.block_count) * hdr.block_size;
+        if (data_bytes > MAX_ALLOWED_CHUNK_BYTES) {
+            throw std::runtime_error("Corrupted chunk: chunk size exceeds safety limit");
+        }
+
         if (buffer.size() < data_bytes) {
             buffer.resize(data_bytes);
         }
@@ -149,11 +161,14 @@ void restore_volume(const CliArgs& args) {
         }
 
         if (!args.verify_only) {
-            if (chunk.start_block == 0) {
-                // Пропуск первого чанка с суперблоком до полного завершения потока
-                first_chunk.assign(buffer.begin(), buffer.begin() + data_bytes);
+            off_t disk_offset = static_cast<off_t>(chunk.start_block) * hdr.block_size;
+            if (static_cast<uint64_t>(disk_offset) < head_guard_bytes) {
+                // Придерживаем чанки, перекрывающие первые 4096 байт, до полного завершения потока
+                deferred_head_chunks.emplace_back(
+                    disk_offset,
+                    std::vector<char>(buffer.begin(), buffer.begin() + data_bytes)
+                );
             } else {
-                off_t disk_offset = static_cast<off_t>(chunk.start_block) * hdr.block_size;
                 pwrite_exact(out_fd.get(), buffer.data(), data_bytes, disk_offset);
             }
         }
@@ -167,17 +182,18 @@ void restore_volume(const CliArgs& args) {
     }
 
     if (!args.verify_only) {
-        if (target_bytes == 0) {
-            off_t full_fs_size = static_cast<off_t>(hdr.total_blocks) * hdr.block_size;
-            if (::ftruncate(out_fd.get(), full_fs_size) != 0) {
+        if (!is_blk_dev) {
+            if (::ftruncate(out_fd.get(), static_cast<off_t>(required_bytes)) != 0) {
                 std::cerr << "Warning: ftruncate failed: " << strerror(errno) << "\n";
             }
         }
 
-        // Сброс основных данных и атомарный возврат суперблока на свое место
+        // Сброс основных данных на диск и атомарный возврат начала раздела (суперблока/VBR)
         ::fsync(out_fd.get());
-        if (!first_chunk.empty()) {
-            pwrite_exact(out_fd.get(), first_chunk.data(), first_chunk.size(), 0);
+        for (const auto& [offset, chunk_data] : deferred_head_chunks) {
+            pwrite_exact(out_fd.get(), chunk_data.data(), chunk_data.size(), offset);
+        }
+        if (!deferred_head_chunks.empty()) {
             ::fsync(out_fd.get());
         }
         out_fd.reset();
@@ -189,12 +205,12 @@ void restore_volume(const CliArgs& args) {
               << restored_blocks << " blocks (CRC32 verified).\n";
 }
 
-
+// Точка входа: разбирает аргументы, запускает восстановление/проверку и перехватывает ошибки
 int main(int argc, char* argv[]) {
     try {
         CliArgs args = parse_cli_args(
             argc, argv,
-            "Block-level image restore & verify tool for ext2/ext3/ext4 filesystems",
+            "Universal block-level image restore & verify tool (ext2/3/4, NTFS, exFAT, raw)",
             "<input_file|-> [target_device]",
             true
         );

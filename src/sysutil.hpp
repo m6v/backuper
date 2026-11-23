@@ -14,6 +14,7 @@
 #include <fcntl.h>
 #include <getopt.h>
 #include <mntent.h>
+#include <sys/file.h>
 
 // Гарантированное выполнение системного вызова ввода-вывода (read/write/pwrite) на всю длину count
 template <typename Func>
@@ -65,14 +66,50 @@ inline void ensure_not_mounted(const std::string& path, bool allow_readonly = fa
 // RAII-обертка над системным файловым дескриптором
 class UniqueFd {
 public:
+    // Открывает файл/устройство и сразу ставит неблокирующий flock (LOCK_SH или LOCK_EX)
+    static UniqueFd open_locked(const std::string& path, int flags, int lock_op, mode_t mode = 0644) {
+        UniqueFd fd(::open(path.c_str(), flags, mode), true);
+        if (!fd) {
+            throw std::runtime_error("Cannot open '" + path + "': " + std::string(strerror(errno)));
+        }
+        if (::flock(fd.get(), lock_op | LOCK_NB) != 0) {
+            throw std::runtime_error("Device or file '" + path + "' is locked by another operation!");
+        }
+        return fd;
+    }
+
+    // Сохранение дескриптора и флага необходимости его автоматического закрытия
     explicit UniqueFd(int fd = -1, bool auto_close = true)
         : fd_(fd), auto_close_(auto_close) {}
 
-    ~UniqueFd() { reset(); }
+    // Гарантированное закрытие дескриптора при выходе объекта из области видимости
+    ~UniqueFd() {
+        reset();
+    }
+
+    // Перемещение владения дескриптором (move-конструктор)
+    UniqueFd(UniqueFd&& other) noexcept
+        : fd_(other.fd_), auto_close_(other.auto_close_) {
+        other.fd_ = -1;
+        other.auto_close_ = false;
+    }
+
+    // Перемещение владения дескриптором (move-присваивание)
+    UniqueFd& operator=(UniqueFd&& other) noexcept {
+        if (this != &other) {
+            reset();
+            fd_ = other.fd_;
+            auto_close_ = other.auto_close_;
+            other.fd_ = -1;
+            other.auto_close_ = false;
+        }
+        return *this;
+    }
 
     UniqueFd(const UniqueFd&) = delete;
     UniqueFd& operator=(const UniqueFd&) = delete;
 
+    // Закрытие текущего дескриптора (если разрешено) и замена его новым
     void reset(int new_fd = -1, bool auto_close = true) {
         if (auto_close_ && fd_ >= 0) {
             ::close(fd_);
@@ -81,7 +118,10 @@ public:
         auto_close_ = auto_close;
     }
 
+    // Возврат сырого файлового дескриптора для системных вызовов
     int get() const { return fd_; }
+
+    // Проверка валидности дескриптора (>= 0)
     explicit operator bool() const { return fd_ >= 0; }
 
 private:

@@ -49,10 +49,7 @@ void backup_volume(const CliArgs& args) {
     Ext2Volume vol(args.src);
     ext2_filsys fs = vol.handle();
 
-    UniqueFd lock_fd(::open(args.src.c_str(), O_RDONLY), true);
-    if (lock_fd && ::flock(lock_fd.get(), LOCK_SH | LOCK_NB) != 0) {
-        throw std::runtime_error("Source device '" + args.src + "' is locked by an exclusive operation!");
-    }
+    UniqueFd lock_fd = UniqueFd::open_locked(args.src, O_RDONLY, LOCK_SH);
 
     if (fs->super->s_feature_incompat & EXT3_FEATURE_INCOMPAT_RECOVER) {
         throw std::runtime_error("Filesystem has dirty journal (needs recovery). Run e2fsck or mount/umount cleanly first.");
