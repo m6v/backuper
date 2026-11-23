@@ -6,7 +6,7 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <sys/file.h>
-#include "partimg.hpp"
+#include "imgwriter.hpp"
 
 // Подключаем C-заголовки ntfs-3g ПОСЛЕ заголовков C++ в режиме совместимости с C
 extern "C" {

@@ -9,6 +9,8 @@
 #include <sys/file.h>
 #include <sys/ioctl.h>
 #include <linux/fs.h>
+#include "sysutil.hpp"
+#include "progress.hpp"
 #include "partimg.hpp"
 
 // Чтение count байт из файла (пайпа) или возврат false при EOF

@@ -2,14 +2,13 @@
 #include <string>
 #include <stdexcept>
 #include <cstring>
-#include <algorithm>
 #include <fcntl.h>
 #include <unistd.h>
 #include <sys/stat.h>
 #include <sys/file.h>
 #include <sys/ioctl.h>
 #include <linux/fs.h>
-#include "partimg.hpp"
+#include "imgwriter.hpp"
 
 // Полное посекторное чтение источника (раздела или файла) и упаковка через ImageWriter
 void backup_raw_volume(const CliArgs& args) {
@@ -62,11 +61,7 @@ void backup_raw_volume(const CliArgs& args) {
     };
 
     ImageWriter writer(args, block_size, total_blocks, total_blocks);
-    const uint32_t step = std::max<uint32_t>(1, (4 * 1024 * 1024) / block_size);
-    for (uint64_t blk = 0; blk < total_blocks; blk += step) {
-        uint32_t count = static_cast<uint32_t>(std::min<uint64_t>(step, total_blocks - blk));
-        writer.write_range(blk, count, read_blocks);
-    }
+    writer.write_range(0, total_blocks, read_blocks);
     writer.finish(read_blocks);
 }
 

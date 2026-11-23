@@ -12,25 +12,26 @@ STATIC_GENERIC  := -static -lz
 PREFIX  ?= /usr/local
 BINDIR  := $(DESTDIR)$(PREFIX)/bin
 
+HEADERS := sysutil.hpp progress.hpp partimg.hpp imgwriter.hpp
 TARGETS := partback.extfs partback.ntfs partback.exfat partback.dd partrest.all
 
 .PHONY: build static install uninstall clean
 
 build: $(TARGETS)
 
-partback.extfs: partback.extfs.cpp partimg.hpp
+partback.extfs: partback.extfs.cpp $(HEADERS)
 	$(CXX) $(CXXFLAGS) partback.extfs.cpp -o $@ $(LDFLAGS_EXTFS)
 
-partback.ntfs: partback.ntfs.cpp partimg.hpp
+partback.ntfs: partback.ntfs.cpp $(HEADERS)
 	$(CXX) $(CXXFLAGS) partback.ntfs.cpp -o $@ $(LDFLAGS_NTFS)
 
-partback.dd: partback.dd.cpp partimg.hpp
+partback.dd: partback.dd.cpp $(HEADERS)
 	$(CXX) $(CXXFLAGS) partback.dd.cpp -o $@ $(LDFLAGS_GENERIC)
 
-partback.exfat: partback.exfat.cpp partimg.hpp
+partback.exfat: partback.exfat.cpp $(HEADERS)
 	$(CXX) $(CXXFLAGS) partback.exfat.cpp -o $@ $(LDFLAGS_GENERIC)
 
-partrest.all: partrest.all.cpp partimg.hpp
+partrest.all: partrest.all.cpp sysutil.hpp progress.hpp partimg.hpp
 	$(CXX) $(CXXFLAGS) partrest.all.cpp -o $@ $(LDFLAGS_GENERIC)
 
 static: partback.extfs.cpp partback.ntfs.cpp partback.dd.cpp partrest.all.cpp partimg.hpp

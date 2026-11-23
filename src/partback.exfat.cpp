@@ -7,7 +7,7 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <sys/file.h>
-#include "partimg.hpp"
+#include "imgwriter.hpp"
 
 #pragma pack(push, 1)
 struct ExfatBootSector {

@@ -5,7 +5,7 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <sys/file.h>
-#include "partimg.hpp"
+#include "imgwriter.hpp"
 #include <ext2fs/ext2fs.h>
 
 // RAII-обертка над дескриптором файловой системы libext2fs
